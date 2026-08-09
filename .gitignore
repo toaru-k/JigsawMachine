@@ -1,0 +1,31 @@
+# CMake and Build Artifacts
+build/
+CMakeCache.txt
+CMakeFiles/
+Makefile
+*.cmake
+*.ninja
+
+# Compiled Output
+*.exe
+*.dll
+*.so
+*.dylib
+*.obj
+*.o
+*.a
+*.lib
+
+# IDE and Editor Files
+.vscode/
+.idea/
+*.suo
+*.sln
+*.sw?
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Any temporary or generated assets
+assets/temp/
