@@ -1,37 +1,18 @@
 #ifndef SEGMENTATION_H
 #define SEGMENTATION_H
 
+#include "PuzzleCore.h"
 #include <vector>
-#include <tuple>
-#include <utility>
 
-struct Piece {
-  int id;
-  int num_pixels;
-  std::vector<std::pair<int, int>> pixels;
-  std::vector<int> neighbors_id;
-  std::tuple<int, int, int> transition;
-  std::tuple<int, int, int> color;
-};
-
-class UnionFind {
-public:
-  UnionFind();
-  void init(int size);
-  int find(int x);
-  bool same(int x, int y);
-  void unite(int x, int y);
-
-private:
-  std::vector<int> parents;
-};
-
-class Puzzle {
+class Segmentation {
 public:
   bool init(const char *filepath);
-  std::tuple<int, int, int> get_pixel_color(int idx);
-  std::vector<int> near_piece(int idx);
   void cleanup();
+
+  std::vector<Piece>& get_pieces() { return pieces; }
+  UnionFind& get_uf() { return uf; }
+  int get_width() const { return w; }
+  int get_height() const { return h; }
 
 private:
   int w, h, n;
@@ -39,8 +20,10 @@ private:
   std::vector<Piece> pieces;
   UnionFind uf;
 
-  void unite_pieces(int idx_a, int idx_b);
+  std::tuple<int, int, int> get_pixel_color(int idx);
   void process();
 };
+
+void unite_pieces(std::vector<Piece>& pieces, UnionFind& uf, int idx_a, int idx_b);
 
 #endif // SEGMENTATION_H

@@ -27,7 +27,9 @@ include_directories(third_party)
 # Source files
 set(SOURCES
     src/main.cpp
+    src/puzzle/PuzzleCore.cpp
     src/puzzle/Segmentation.cpp
+    src/puzzle/PuzzleBoard.cpp
 )
 
 # Executable target (WIN32 hides the console window on Windows)
