@@ -3,8 +3,8 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
-#define MIN_PIECE_SIZE 100
-#define DATA_MASK 0xf8
+#define MIN_PIECE_SIZE 200
+#define DATA_MASK 0xf0
 
 bool Segmentation::init(const char *filepath) {
   data = stbi_load(filepath, &w, &h, &n, 3);
@@ -146,6 +146,13 @@ void Segmentation::process() {
     post_unite_pieces(pieces, uf);
   }
 
-  std::cout << "2. Color & Shape Filtered: " << pieces.size() << " pixels"
+  int piece_cout = 0;
+  for (int i = 0; i < pieces.size(); i++) {
+    if (uf.find(i) == i) {
+      piece_cout++;
+    }
+  }
+
+  std::cout << "2. Color & Shape Filtered: " << piece_cout << " pieces"
             << std::endl;
 }

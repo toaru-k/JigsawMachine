@@ -56,11 +56,15 @@ bool PuzzleBoard::snap_piece(int idx) {
     pieces[root].offset_x = pieces[nroot].offset_x;
     pieces[root].offset_y = pieces[nroot].offset_y;
 
-    unite_pieces(pieces, uf, root, nroot);
+    pre_unite_pieces(uf, root, nroot);
     
-    // Update root because unite_pieces changed the structure
+    // Update root because pre_unite_pieces changed the structure
     root = uf.find(root); 
     snapped = true;
+  }
+  
+  if (snapped) {
+      post_unite_pieces(pieces, uf);
   }
   
   return snapped;
