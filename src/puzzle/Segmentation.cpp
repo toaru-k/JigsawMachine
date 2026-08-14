@@ -1,5 +1,6 @@
 #include "Segmentation.h"
 #include <iostream>
+#define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
 #define MIN_PIECE_SIZE 100
@@ -11,6 +12,8 @@ bool Segmentation::init(const char *filepath) {
     std::cerr << "Failed to load image" << std::endl;
     return false;
   }
+
+  std::cout << "width=" << w << ", height=" << h << ", n=" << n << std::endl;
 
   uf.init(w * h);
   pieces.resize(w * h);
@@ -38,6 +41,9 @@ bool Segmentation::init(const char *filepath) {
     }
   }
 
+  std::cout << "0. Initializing pieces: " << pieces.size() << " pixels"
+            << std::endl;
+
   process();
   return true;
 }
@@ -50,29 +56,37 @@ std::tuple<int, int, int> Segmentation::get_pixel_color(int idx) {
 }
 
 void Segmentation::cleanup() {
-  stbi_image_free(data);
+  if (data) {
+    stbi_image_free(data);
+    data = nullptr;
+  }
   pieces.clear();
   pieces.shrink_to_fit();
 }
 
 void Segmentation::process() {
-  /* 同色との結合 */
+  /* 同色との結合 (Union-Findツリー上の結合のみ) */
   for (int x = 0; x < w; x++) {
     for (int y = 0; y < h; y++) {
       int idx = x + y * w;
       auto color = pieces[idx].color;
       if (x + 1 < w) {
         if (color == pieces[idx + 1].color) {
-          unite_pieces(pieces, uf, idx, idx + 1);
+          pre_unite_pieces(uf, idx, idx + 1);
         }
       }
       if (y + 1 < h) {
         if (color == pieces[idx + w].color) {
-          unite_pieces(pieces, uf, idx, idx + w);
+          pre_unite_pieces(uf, idx, idx + w);
         }
       }
     }
   }
+
+  // ルートにデータを集約し、隣接情報を整理する
+  post_unite_pieces(pieces, uf);
+
+  std::cout << "1. Color Filtered: " << pieces.size() << " pixels" << std::endl;
 
   /* 面積が最小のピースを探し、そのピースの最も色が近い隣接ピースと結合する */
   std::vector<int> small_piece_idx;
@@ -84,6 +98,8 @@ void Segmentation::process() {
 
   bool changed = true;
   while (changed && !small_piece_idx.empty()) {
+    std::cout << "Small Pieces: " << small_piece_idx.size() << std::endl;
+
     changed = false;
     for (int k = 0; k < small_piece_idx.size();) {
       int i = small_piece_idx[k];
@@ -117,7 +133,7 @@ void Segmentation::process() {
       }
 
       if (best_neighbor_id != -1) {
-        unite_pieces(pieces, uf, i, best_neighbor_id);
+        pre_unite_pieces(uf, i, best_neighbor_id);
         changed = true;
       } else {
         small_piece_idx[k] = small_piece_idx.back();
@@ -126,5 +142,10 @@ void Segmentation::process() {
       }
       k++;
     }
+
+    post_unite_pieces(pieces, uf);
   }
+
+  std::cout << "2. Color & Shape Filtered: " << pieces.size() << " pixels"
+            << std::endl;
 }

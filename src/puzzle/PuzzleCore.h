@@ -1,9 +1,9 @@
 #ifndef PUZZLE_CORE_H
 #define PUZZLE_CORE_H
 
-#include <vector>
 #include <tuple>
 #include <utility>
+#include <vector>
 
 struct Piece {
   int id;
@@ -27,6 +27,7 @@ private:
   std::vector<int> parents;
 };
 
-void unite_pieces(std::vector<Piece>& pieces, UnionFind& uf, int idx_a, int idx_b);
+void pre_unite_pieces(UnionFind &uf, int idx_a, int idx_b);
+void post_unite_pieces(std::vector<Piece> &pieces, UnionFind &uf);
 
 #endif // PUZZLE_CORE_H
