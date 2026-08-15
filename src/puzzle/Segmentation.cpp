@@ -6,14 +6,46 @@
 #define MIN_PIECE_SIZE 200
 #define DATA_MASK 0xf0
 
-bool Segmentation::init(const char *filepath) {
-  data = stbi_load(filepath, &w, &h, &n, 3);
-  if (!data) {
+bool Segmentation::init(const char *filepath, int max_dimension) {
+  original_data = stbi_load(filepath, &orig_w, &orig_h, &n, 3);
+  if (!original_data) {
     std::cerr << "Failed to load image" << std::endl;
     return false;
   }
 
-  std::cout << "width=" << w << ", height=" << h << ", n=" << n << std::endl;
+  int max_dim = std::max(orig_w, orig_h);
+  float scale = std::min(1.0f, (float)max_dimension / max_dim);
+
+  w = orig_w;
+  h = orig_h;
+
+  if (scale < 1.0f) {
+    w = (int)(orig_w * scale);
+    h = (int)(orig_h * scale);
+    data = (unsigned char *)malloc(w * h * 3);
+    for (int y = 0; y < h; y++) {
+      for (int x = 0; x < w; x++) {
+        int src_x = (int)(x / scale);
+        int src_y = (int)(y / scale);
+        if (src_x >= orig_w)
+          src_x = orig_w - 1;
+        if (src_y >= orig_h)
+          src_y = orig_h - 1;
+
+        int src_idx = (src_y * orig_w + src_x) * 3;
+        int dst_idx = (y * w + x) * 3;
+        data[dst_idx + 0] = original_data[src_idx + 0];
+        data[dst_idx + 1] = original_data[src_idx + 1];
+        data[dst_idx + 2] = original_data[src_idx + 2];
+      }
+    }
+  } else {
+    data = (unsigned char *)malloc(w * h * 3);
+    memcpy(data, original_data, w * h * 3);
+  }
+
+  std::cout << "width=" << w << ", height=" << h << ", orig_w=" << orig_w
+            << ", orig_h=" << orig_h << ", n=" << n << std::endl;
 
   uf.init(w * h);
   pieces.resize(w * h);
@@ -56,8 +88,12 @@ std::tuple<int, int, int> Segmentation::get_pixel_color(int idx) {
 }
 
 void Segmentation::cleanup() {
+  if (original_data) {
+    stbi_image_free(original_data);
+    original_data = nullptr;
+  }
   if (data) {
-    stbi_image_free(data);
+    free(data);
     data = nullptr;
   }
   pieces.clear();

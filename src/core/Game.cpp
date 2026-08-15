@@ -270,11 +270,17 @@ void Game::clean_textures() {
 }
 
 void Game::load_image(const std::string &filepath) {
+  pending_filepath = filepath;
+  state = GameState::DIFFICULTY_SELECT;
+}
+
+void Game::start_puzzle(int max_dimension) {
   for (auto &pair : piece_textures) {
     if (pair.second.texture)
       SDL_DestroyTexture(pair.second.texture);
   }
   piece_textures.clear();
+
   if (original_texture) {
     SDL_DestroyTexture(original_texture);
     original_texture = nullptr;
@@ -289,8 +295,8 @@ void Game::load_image(const std::string &filepath) {
   }
   segmentation.cleanup();
 
-  std::cout << "Loading image: " << filepath << std::endl;
-  if (segmentation.init(filepath.c_str())) {
+  std::cout << "Loading image: " << pending_filepath << std::endl;
+  if (segmentation.init(pending_filepath.c_str(), max_dimension)) {
     board = std::make_unique<PuzzleBoard>(
         segmentation.get_pieces(), segmentation.get_uf(),
         segmentation.get_width(), segmentation.get_height());
@@ -315,7 +321,8 @@ void Game::load_image(const std::string &filepath) {
     state = GameState::PLAYING;
     std::cout << "Succeeded to load image" << std::endl;
   } else {
-    std::cerr << "Failed to load image: " << filepath << std::endl;
+    std::cerr << "Failed to load image: " << pending_filepath << std::endl;
+    state = GameState::MENU;
   }
 }
 
@@ -569,6 +576,7 @@ void Game::handle_events() {
                 state = GameState::CLEARED;
                 clear_anim_start_time = SDL_GetTicks();
                 clear_sound_played = false;
+                clear_anim_prev_radius = 0;
                 
                 // Get the position of the click in the puzzle image space
                 auto& pieces = segmentation.get_pieces();
@@ -588,7 +596,7 @@ void Game::handle_events() {
 
                 // We will generate the original and retro textures here
                 SDL_Surface *orig_surf = SDL_CreateRGBSurfaceWithFormat(
-                    0, segmentation.get_width(), segmentation.get_height(), 32, SDL_PIXELFORMAT_RGBA32);
+                    0, segmentation.orig_w, segmentation.orig_h, 32, SDL_PIXELFORMAT_RGBA32);
                 if (clear_retro_surf) SDL_FreeSurface(clear_retro_surf);
                 clear_retro_surf = SDL_CreateRGBSurfaceWithFormat(
                     0, segmentation.get_width(), segmentation.get_height(), 32, SDL_PIXELFORMAT_RGBA32);
@@ -597,7 +605,18 @@ void Game::handle_events() {
                 SDL_LockSurface(clear_retro_surf);
                 Uint32 *orig_pixels = (Uint32 *)orig_surf->pixels;
                 Uint32 *retro_pixels = (Uint32 *)clear_retro_surf->pixels;
-                int pitch = orig_surf->pitch / 4;
+                int orig_pitch = orig_surf->pitch / 4;
+                int retro_pitch = clear_retro_surf->pitch / 4;
+                
+                for (int y = 0; y < segmentation.orig_h; ++y) {
+                  for (int x = 0; x < segmentation.orig_w; ++x) {
+                    int idx = (y * segmentation.orig_w + x) * 3;
+                    unsigned char r = segmentation.original_data[idx + 0];
+                    unsigned char g = segmentation.original_data[idx + 1];
+                    unsigned char b = segmentation.original_data[idx + 2];
+                    orig_pixels[y * orig_pitch + x] = SDL_MapRGBA(orig_surf->format, r, g, b, 255);
+                  }
+                }
                 
                 for (int y = 0; y < segmentation.get_height(); ++y) {
                   for (int x = 0; x < segmentation.get_width(); ++x) {
@@ -606,13 +625,11 @@ void Game::handle_events() {
                     unsigned char g = segmentation.data[idx + 1];
                     unsigned char b = segmentation.data[idx + 2];
                     
-                    orig_pixels[y * pitch + x] = SDL_MapRGBA(orig_surf->format, r, g, b, 255);
-                    
                     // Retro is masked
                     unsigned char rr = r & 0xf0;
                     unsigned char rg = g & 0xf0;
                     unsigned char rb = b & 0xf0;
-                    retro_pixels[y * pitch + x] = SDL_MapRGBA(clear_retro_surf->format, rr, rg, rb, 255);
+                    retro_pixels[y * retro_pitch + x] = SDL_MapRGBA(clear_retro_surf->format, rr, rg, rb, 255);
                   }
                 }
                 SDL_UnlockSurface(clear_retro_surf);
@@ -646,6 +663,27 @@ void Game::handle_events() {
             event.button.x >= window_width - sidebar_width + 20 &&
             event.button.x <= window_width - sidebar_width + 60) {
           open_file_dialog();
+        }
+      }
+    } else if (state == GameState::DIFFICULTY_SELECT) {
+      if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+        int x = event.button.x;
+        int y = event.button.y;
+        SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300, 240};
+        
+        SDL_Rect btn1 = {modal.x + 50, modal.y + 60, 200, 30};
+        SDL_Rect btn2 = {modal.x + 50, modal.y + 100, 200, 30};
+        SDL_Rect btn3 = {modal.x + 50, modal.y + 140, 200, 30};
+        SDL_Rect btn4 = {modal.x + 50, modal.y + 180, 200, 30};
+        
+        if (x >= btn1.x && x <= btn1.x + btn1.w && y >= btn1.y && y <= btn1.y + btn1.h) {
+          start_puzzle(100); // Easy
+        } else if (x >= btn2.x && x <= btn2.x + btn2.w && y >= btn2.y && y <= btn2.y + btn2.h) {
+          start_puzzle(250); // Normal
+        } else if (x >= btn3.x && x <= btn3.x + btn3.w && y >= btn3.y && y <= btn3.y + btn3.h) {
+          start_puzzle(400); // Hard
+        } else if (x >= btn4.x && x <= btn4.x + btn4.w && y >= btn4.y && y <= btn4.y + btn4.h) {
+          start_puzzle(4000); // Very Hard
         }
       }
     }
@@ -688,11 +726,7 @@ void Game::update() {
     int max_radius = std::max(segmentation.get_width(), segmentation.get_height()) * 1.5f;
     int current_radius = (int)(max_radius * progress);
     
-    // To calculate prev_radius smoothly
-    static int prev_radius = 0;
-    if (progress == 0.0f) prev_radius = 0;
-    
-    if (retro_texture && clear_retro_surf && current_radius > prev_radius) {
+    if (retro_texture && clear_retro_surf && current_radius > clear_anim_prev_radius) {
        SDL_LockSurface(clear_retro_surf);
        Uint32* format_pixels = (Uint32*)clear_retro_surf->pixels;
        int w = segmentation.get_width();
@@ -713,7 +747,7 @@ void Game::update() {
                int dist_sq = dx * dx + dy * dy;
                
                // If pixel is in the newly expanded ring
-               if (dist_sq <= current_radius * current_radius && dist_sq > prev_radius * prev_radius) {
+               if (dist_sq <= current_radius * current_radius && dist_sq > clear_anim_prev_radius * clear_anim_prev_radius) {
                    Uint32 current_color = format_pixels[y * pitch + x];
                    if (current_color != 0) { 
                        Uint8 r, g, b, a;
@@ -743,7 +777,7 @@ void Game::update() {
        Uint32* offset_pixels = format_pixels + (min_y * pitch + min_x);
        SDL_UpdateTexture(retro_texture, &update_rect, offset_pixels, clear_retro_surf->pitch);
        
-       prev_radius = current_radius;
+       clear_anim_prev_radius = current_radius;
     }
   }
 }
@@ -1011,6 +1045,39 @@ void Game::render() {
   render_playground();
   render_menu_buttons();
   render_inventory();
+
+  if (state == GameState::DIFFICULTY_SELECT) {
+    SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300, 240};
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
+    SDL_RenderFillRect(renderer, &modal);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    
+    SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+    SDL_RenderDrawRect(renderer, &modal);
+    
+    draw_text("Select Difficulty", modal.x + 10, modal.y + 20, 2, 255, 255, 255);
+    
+    SDL_Rect btn1 = {modal.x + 50, modal.y + 60, 200, 30};
+    SDL_SetRenderDrawColor(renderer, 40, 140, 40, 255);
+    SDL_RenderFillRect(renderer, &btn1);
+    draw_text("Easy", btn1.x + 75, btn1.y + 8, 2, 255, 255, 255);
+    
+    SDL_Rect btn2 = {modal.x + 50, modal.y + 100, 200, 30};
+    SDL_SetRenderDrawColor(renderer, 180, 140, 40, 255);
+    SDL_RenderFillRect(renderer, &btn2);
+    draw_text("Normal", btn2.x + 65, btn2.y + 8, 2, 255, 255, 255);
+    
+    SDL_Rect btn3 = {modal.x + 50, modal.y + 140, 200, 30};
+    SDL_SetRenderDrawColor(renderer, 180, 40, 40, 255);
+    SDL_RenderFillRect(renderer, &btn3);
+    draw_text("Hard", btn3.x + 75, btn3.y + 8, 2, 255, 255, 255);
+
+    SDL_Rect btn4 = {modal.x + 50, modal.y + 180, 200, 30};
+    SDL_SetRenderDrawColor(renderer, 100, 0, 0, 255);
+    SDL_RenderFillRect(renderer, &btn4);
+    draw_text("Very Hard", btn4.x + 45, btn4.y + 8, 2, 255, 255, 255);
+  }
 
   SDL_RenderPresent(renderer);
 }

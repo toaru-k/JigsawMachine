@@ -25,7 +25,7 @@ struct Particle {
   float size;
 };
 
-enum class GameState { MENU, PLAYING, CLEARED };
+enum class GameState { MENU, DIFFICULTY_SELECT, PLAYING, CLEARED };
 
 class Game {
 public:
@@ -37,6 +37,7 @@ public:
   void clean();
 
   void load_image(const std::string &filepath);
+  void start_puzzle(int max_dimension);
 
 private:
   void handle_events();
@@ -70,6 +71,9 @@ private:
   float camera_x;
   float camera_y;
   float camera_zoom;
+
+  std::string pending_filepath;
+
   bool is_panning;
 
   float grab_offset_x;
@@ -88,6 +92,7 @@ private:
   Uint32 clear_anim_start_time;
   int clear_click_x;
   int clear_click_y;
+  int clear_anim_prev_radius;
   SDL_Texture* original_texture;
   SDL_Texture* retro_texture;
   SDL_Surface* clear_retro_surf;

@@ -9,7 +9,10 @@ public:
   int w = 0, h = 0, n = 0;
   unsigned char *data = nullptr;
 
-  bool init(const char *filepath);
+  int orig_w, orig_h;
+  unsigned char *original_data;
+
+  bool init(const char *filepath, int max_dimension = 400);
   void cleanup();
 
   std::vector<Piece> &get_pieces() { return pieces; }
