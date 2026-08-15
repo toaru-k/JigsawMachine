@@ -64,7 +64,7 @@ int main() {
       int idx = x + y * 4;
       seg2.pieces[idx].id = idx;
       seg2.pieces[idx].num_pixels = 1;
-      seg2.pieces[idx].pixels.push_back(std::make_pair(x, y));
+      seg2.pieces[idx].pixels.push_back(idx);
       seg2.pieces[idx].offset_x = 0;
       seg2.pieces[idx].offset_y = 0;
       if (x > 0) seg2.pieces[idx].neighbors_id.push_back(idx - 1);

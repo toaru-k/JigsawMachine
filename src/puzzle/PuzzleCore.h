@@ -8,7 +8,7 @@
 struct Piece {
   int id;
   int num_pixels;
-  std::vector<std::pair<int, int>> pixels;
+  std::vector<int> pixels;
   std::vector<int> neighbors_id;
   int offset_x = 0;
   int offset_y = 0;

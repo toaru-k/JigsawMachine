@@ -1,5 +1,4 @@
 #include "Segmentation.h"
-#include <iostream>
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb_image.h>
 
@@ -9,7 +8,7 @@
 bool Segmentation::init(const char *filepath, int max_dimension, bool skip_process) {
   original_data = stbi_load(filepath, &orig_w, &orig_h, &n, 3);
   if (!original_data) {
-    std::cerr << "Failed to load image" << std::endl;
+
     return false;
   }
 
@@ -44,8 +43,6 @@ bool Segmentation::init(const char *filepath, int max_dimension, bool skip_proce
     memcpy(data, original_data, w * h * 3);
   }
 
-  std::cout << "width=" << w << ", height=" << h << ", orig_w=" << orig_w
-            << ", orig_h=" << orig_h << ", n=" << n << std::endl;
 
   uf.init(w * h);
   pieces.resize(w * h);
@@ -56,7 +53,7 @@ bool Segmentation::init(const char *filepath, int max_dimension, bool skip_proce
 
       pieces[idx].id = idx;
       pieces[idx].num_pixels = 1;
-      pieces[idx].pixels.push_back(std::make_pair(x, y));
+      pieces[idx].pixels.push_back(idx);
       pieces[idx].color = get_pixel_color(idx);
       // Initialize offset explicitly to 0 (though Piece struct does it too)
       pieces[idx].offset_x = 0;
@@ -73,8 +70,6 @@ bool Segmentation::init(const char *filepath, int max_dimension, bool skip_proce
     }
   }
 
-  std::cout << "0. Initializing pieces: " << pieces.size() << " pixels"
-            << std::endl;
 
   if (!skip_process) {
     process();
@@ -124,7 +119,7 @@ void Segmentation::process() {
   // ルートにデータを集約し、隣接情報を整理する
   post_unite_pieces(pieces, uf);
 
-  std::cout << "1. Color Filtered: " << pieces.size() << " pixels" << std::endl;
+
 
   /* 面積が最小のピースを探し、そのピースの最も色が近い隣接ピースと結合する */
   std::vector<int> small_piece_idx;
@@ -136,7 +131,7 @@ void Segmentation::process() {
 
   bool changed = true;
   while (changed && !small_piece_idx.empty()) {
-    std::cout << "Small Pieces: " << small_piece_idx.size() << std::endl;
+
 
     changed = false;
     for (int k = 0; k < small_piece_idx.size();) {
@@ -191,6 +186,5 @@ void Segmentation::process() {
     }
   }
 
-  std::cout << "2. Color & Shape Filtered: " << piece_cout << " pieces"
-            << std::endl;
+
 }

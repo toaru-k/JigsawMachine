@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
-#include <iostream>
 #include <vector>
 #include <windows.h>
 
@@ -32,8 +31,7 @@ Game::~Game() { clean(); }
 
 bool Game::init(const char *title, int width, int height) {
   if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) < 0) {
-    std::cerr << "SDL could not initialize! SDL_Error: " << SDL_GetError()
-              << std::endl;
+
     return false;
   }
 
@@ -41,8 +39,7 @@ bool Game::init(const char *title, int width, int height) {
       SDL_CreateWindow(title, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED,
                        width, height, SDL_WINDOW_SHOWN | SDL_WINDOW_RESIZABLE);
   if (!window) {
-    std::cerr << "Window could not be created! SDL_Error: " << SDL_GetError()
-              << std::endl;
+
     return false;
   }
 
@@ -50,8 +47,7 @@ bool Game::init(const char *title, int width, int height) {
 
   renderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED);
   if (!renderer) {
-    std::cerr << "Renderer could not be created! SDL_Error: " << SDL_GetError()
-              << std::endl;
+
     return false;
   }
 
@@ -61,9 +57,7 @@ bool Game::init(const char *title, int width, int height) {
   window_height = height;
   is_running = true;
 
-  std::cout
-      << "Select the image (.jpg or .png, .bmp) from the File Explorer to play"
-      << std::endl;
+
 
   init_audio();
 
@@ -188,14 +182,16 @@ void Game::generate_texture(int piece_id) {
 
   int min_x = 100000, max_x = -1, min_y = 100000, max_y = -1;
   for (const auto &pix : p.pixels) {
-    if (pix.first < min_x)
-      min_x = pix.first;
-    if (pix.first > max_x)
-      max_x = pix.first;
-    if (pix.second < min_y)
-      min_y = pix.second;
-    if (pix.second > max_y)
-      max_y = pix.second;
+    int px = pix % segmentation.w;
+    int py = pix / segmentation.w;
+    if (px < min_x)
+      min_x = px;
+    if (px > max_x)
+      max_x = px;
+    if (py < min_y)
+      min_y = py;
+    if (py > max_y)
+      max_y = py;
   }
   int w = max_x - min_x + 1;
   int h = max_y - min_y + 1;
@@ -213,21 +209,25 @@ void Game::generate_texture(int piece_id) {
 
   std::vector<bool> in_piece(w * h, false);
   for (const auto &pix : p.pixels) {
-    int lx = pix.first - min_x;
-    int ly = pix.second - min_y;
+    int px = pix % segmentation.w;
+    int py = pix / segmentation.w;
+    int lx = px - min_x;
+    int ly = py - min_y;
     in_piece[ly * w + lx] = true;
   }
 
   for (const auto &pix : p.pixels) {
-    int lx = pix.first - min_x;
-    int ly = pix.second - min_y;
+    int px = pix % segmentation.w;
+    int py = pix / segmentation.w;
+    int lx = px - min_x;
+    int ly = py - min_y;
 
     bool top = ly == 0 || !in_piece[(ly - 1) * w + lx];
     bool left = lx == 0 || !in_piece[ly * w + (lx - 1)];
     bool bottom = ly == h - 1 || !in_piece[(ly + 1) * w + lx];
     bool right = lx == w - 1 || !in_piece[ly * w + (lx + 1)];
 
-    int orig_idx = pix.first + pix.second * segmentation.w;
+    int orig_idx = pix;
     unsigned char r = segmentation.data[orig_idx * 3 + 0] & DATA_MASK;
     unsigned char g = segmentation.data[orig_idx * 3 + 1] & DATA_MASK;
     unsigned char b = segmentation.data[orig_idx * 3 + 2] & DATA_MASK;
@@ -300,7 +300,7 @@ void Game::start_puzzle(int max_dimension) {
   }
   segmentation.cleanup();
 
-  std::cout << "Loading image: " << pending_filepath << std::endl;
+
   if (segmentation.init(pending_filepath.c_str(), max_dimension)) {
     board = std::make_unique<PuzzleBoard>(
         segmentation.get_pieces(), segmentation.get_uf(),
@@ -324,9 +324,9 @@ void Game::start_puzzle(int max_dimension) {
     camera_zoom = 1.0f;
 
     state = GameState::PLAYING;
-    std::cout << "Succeeded to load image" << std::endl;
+
   } else {
-    std::cerr << "Failed to load image: " << pending_filepath << std::endl;
+
     state = GameState::MENU;
   }
 }
@@ -373,9 +373,9 @@ void Game::save_game_dialog() {
 
   if (GetSaveFileNameA(&ofn) == TRUE) {
     if (save_game(ofn.lpstrFile)) {
-      std::cout << "Game saved to: " << ofn.lpstrFile << std::endl;
+
     } else {
-      std::cerr << "Failed to save game!" << std::endl;
+
     }
   }
 }
@@ -398,9 +398,9 @@ void Game::load_game_dialog() {
 
   if (GetOpenFileNameA(&ofn) == TRUE) {
     if (load_game(ofn.lpstrFile)) {
-      std::cout << "Game loaded from: " << ofn.lpstrFile << std::endl;
+
     } else {
-      std::cerr << "Failed to load game!" << std::endl;
+
     }
   }
 }
@@ -666,8 +666,8 @@ void Game::handle_events() {
 
                   bool hit = false;
                   for (const auto &pix : p.pixels) {
-                    float px_pix = pix.first + p.offset_x;
-                    float py_pix = pix.second + p.offset_y;
+                    float px_pix = (pix % segmentation.w) + p.offset_x;
+                    float py_pix = (pix / segmentation.w) + p.offset_y;
                     if (std::abs(px_pix - world_x) <= margin + 0.5f &&
                         std::abs(py_pix - world_y) <= margin + 0.5f) {
                       hit = true;
