@@ -21,7 +21,9 @@ Game::Game()
       state(GameState::MENU), audio_device(0), selected_piece_id(-1),
       window_width(0), window_height(0), camera_x(0.0f), camera_y(0.0f),
       camera_zoom(1.0f), is_panning(false), grab_offset_x(0.0f),
-      grab_offset_y(0.0f), sidebar_width(200), inventory_page(0) {}
+      grab_offset_y(0.0f), sidebar_width(200), inventory_page(0),
+      clear_anim_start_time(0), clear_click_x(0), clear_click_y(0),
+      original_texture(nullptr), retro_texture(nullptr), clear_retro_surf(nullptr), clear_sound_played(false) {}
 
 Game::~Game() { clean(); }
 
@@ -103,6 +105,43 @@ void Game::play_snap_sound() {
 
     phase += 2.0f * M_PI * freq / sample_rate;
     freq -= 1000.0f / num_samples; // Pitch sweep down
+  }
+
+  SDL_QueueAudio(audio_device, buffer.data(), buffer.size() * sizeof(int16_t));
+}
+
+void Game::play_clear_sound() {
+  if (audio_device == 0)
+    return;
+
+  const int sample_rate = 44100;
+  const int duration_ms = 800; // 800ms clear jingle
+  const int num_samples = (sample_rate * duration_ms) / 1000;
+  std::vector<int16_t> buffer(num_samples);
+
+  // Arpeggio frequencies: C5, E5, G5, C6
+  float freqs[] = {523.25f, 659.25f, 783.99f, 1046.50f};
+  int num_notes = 4;
+  int samples_per_note = num_samples / num_notes;
+
+  float phase = 0.0f;
+  for (int i = 0; i < num_samples; ++i) {
+    int note_idx = i / samples_per_note;
+    float freq = freqs[note_idx];
+
+    // Envelope per note
+    int note_sample = i % samples_per_note;
+    float volume = 1.0f - (float)note_sample / samples_per_note;
+    if (note_idx == num_notes - 1) {
+      volume = 1.0f - (float)note_sample / (samples_per_note * 2.0f); // Last note rings out longer
+      if (volume < 0.0f) volume = 0.0f;
+    }
+
+    // Square wave + slight duty cycle variation
+    float wave = (sin(phase) > 0.5f) ? 1.0f : -1.0f;
+
+    buffer[i] = (int16_t)(16000.0f * volume * wave);
+    phase += 2.0f * M_PI * freq / sample_rate;
   }
 
   SDL_QueueAudio(audio_device, buffer.data(), buffer.size() * sizeof(int16_t));
@@ -236,6 +275,18 @@ void Game::load_image(const std::string &filepath) {
       SDL_DestroyTexture(pair.second.texture);
   }
   piece_textures.clear();
+  if (original_texture) {
+    SDL_DestroyTexture(original_texture);
+    original_texture = nullptr;
+  }
+  if (retro_texture) {
+    SDL_DestroyTexture(retro_texture);
+    retro_texture = nullptr;
+  }
+  if (clear_retro_surf) {
+    SDL_FreeSurface(clear_retro_surf);
+    clear_retro_surf = nullptr;
+  }
   segmentation.cleanup();
 
   std::cout << "Loading image: " << filepath << std::endl;
@@ -340,7 +391,7 @@ void Game::handle_events() {
       char *dropped_filedir = event.drop.file;
       load_image(dropped_filedir);
       SDL_free(dropped_filedir);
-    } else if (state == GameState::PLAYING) {
+    } else if (state == GameState::PLAYING || state == GameState::CLEARED) {
       bool in_sidebar = is_mouse_over_sidebar(event.button.x);
 
       if (event.type == SDL_MOUSEWHEEL) {
@@ -372,7 +423,8 @@ void Game::handle_events() {
           auto &pieces = segmentation.get_pieces();
           auto &uf = segmentation.get_uf();
 
-          for (int i = pieces.size() - 1; i >= 0; --i) {
+          if (state == GameState::PLAYING) {
+            for (int i = pieces.size() - 1; i >= 0; --i) {
             if (uf.find(i) == i) {
               if (in_inventory[i])
                 continue;
@@ -407,6 +459,7 @@ void Game::handle_events() {
                 }
               }
             }
+          }
           }
         }
 
@@ -470,7 +523,7 @@ void Game::handle_events() {
               }
             }
           } else {
-            if (hit_piece_id != -1) {
+            if (hit_piece_id != -1 && state == GameState::PLAYING) {
               selected_piece_id = hit_piece_id;
               grab_offset_x = hit_grab_x;
               grab_offset_y = hit_grab_y;
@@ -514,6 +567,70 @@ void Game::handle_events() {
               selected_piece_id = -1;
               if (board->is_cleared()) {
                 state = GameState::CLEARED;
+                clear_anim_start_time = SDL_GetTicks();
+                clear_sound_played = false;
+                
+                // Get the position of the click in the puzzle image space
+                auto& pieces = segmentation.get_pieces();
+                int root = segmentation.get_uf().find(0); // Everything is one piece now
+                
+                float world_x = (event.button.x - camera_x) / camera_zoom;
+                float world_y = (event.button.y - camera_y) / camera_zoom;
+                
+                clear_click_x = (int)world_x - pieces[root].offset_x;
+                clear_click_y = (int)world_y - pieces[root].offset_y;
+                
+                // If the user clicked outside the image somehow, clamp it
+                if (clear_click_x < 0) clear_click_x = 0;
+                if (clear_click_x >= segmentation.get_width()) clear_click_x = segmentation.get_width() - 1;
+                if (clear_click_y < 0) clear_click_y = 0;
+                if (clear_click_y >= segmentation.get_height()) clear_click_y = segmentation.get_height() - 1;
+
+                // We will generate the original and retro textures here
+                SDL_Surface *orig_surf = SDL_CreateRGBSurfaceWithFormat(
+                    0, segmentation.get_width(), segmentation.get_height(), 32, SDL_PIXELFORMAT_RGBA32);
+                if (clear_retro_surf) SDL_FreeSurface(clear_retro_surf);
+                clear_retro_surf = SDL_CreateRGBSurfaceWithFormat(
+                    0, segmentation.get_width(), segmentation.get_height(), 32, SDL_PIXELFORMAT_RGBA32);
+                
+                SDL_LockSurface(orig_surf);
+                SDL_LockSurface(clear_retro_surf);
+                Uint32 *orig_pixels = (Uint32 *)orig_surf->pixels;
+                Uint32 *retro_pixels = (Uint32 *)clear_retro_surf->pixels;
+                int pitch = orig_surf->pitch / 4;
+                
+                for (int y = 0; y < segmentation.get_height(); ++y) {
+                  for (int x = 0; x < segmentation.get_width(); ++x) {
+                    int idx = (y * segmentation.get_width() + x) * 3;
+                    unsigned char r = segmentation.data[idx + 0];
+                    unsigned char g = segmentation.data[idx + 1];
+                    unsigned char b = segmentation.data[idx + 2];
+                    
+                    orig_pixels[y * pitch + x] = SDL_MapRGBA(orig_surf->format, r, g, b, 255);
+                    
+                    // Retro is masked
+                    unsigned char rr = r & 0xf0;
+                    unsigned char rg = g & 0xf0;
+                    unsigned char rb = b & 0xf0;
+                    retro_pixels[y * pitch + x] = SDL_MapRGBA(clear_retro_surf->format, rr, rg, rb, 255);
+                  }
+                }
+                SDL_UnlockSurface(clear_retro_surf);
+                SDL_UnlockSurface(orig_surf);
+                
+                if (original_texture) SDL_DestroyTexture(original_texture);
+                original_texture = SDL_CreateTextureFromSurface(renderer, orig_surf);
+                SDL_SetTextureBlendMode(original_texture, SDL_BLENDMODE_BLEND);
+                
+                if (retro_texture) SDL_DestroyTexture(retro_texture);
+                retro_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, segmentation.get_width(), segmentation.get_height());
+                SDL_SetTextureBlendMode(retro_texture, SDL_BLENDMODE_BLEND);
+                
+                SDL_UpdateTexture(retro_texture, NULL, clear_retro_surf->pixels, clear_retro_surf->pitch);
+                
+                SDL_FreeSurface(orig_surf);
+                
+                particles.clear();
               }
             }
           } else {
@@ -521,7 +638,7 @@ void Game::handle_events() {
           }
         }
       }
-    } else if (state == GameState::MENU || state == GameState::CLEARED) {
+    } else if (state == GameState::MENU) {
       bool in_sidebar = is_mouse_over_sidebar(event.button.x);
       if (event.type == SDL_MOUSEBUTTONDOWN &&
           event.button.button == SDL_BUTTON_LEFT) {
@@ -529,10 +646,6 @@ void Game::handle_events() {
             event.button.x >= window_width - sidebar_width + 20 &&
             event.button.x <= window_width - sidebar_width + 60) {
           open_file_dialog();
-        } else if (state == GameState::CLEARED) {
-          state = GameState::MENU;
-          segmentation.cleanup();
-          board.reset();
         }
       }
     }
@@ -540,7 +653,7 @@ void Game::handle_events() {
 }
 
 void Game::update() {
-  if (state == GameState::PLAYING) {
+  if (state == GameState::PLAYING || state == GameState::CLEARED) {
     const Uint8 *keys = SDL_GetKeyboardState(NULL);
     float pan_speed = 30.0f;
     if (keys[SDL_SCANCODE_W])
@@ -551,6 +664,87 @@ void Game::update() {
       camera_x += pan_speed;
     if (keys[SDL_SCANCODE_D])
       camera_x -= pan_speed;
+  }
+  
+  if (state == GameState::CLEARED) {
+    if (!clear_sound_played) {
+      play_clear_sound();
+      clear_sound_played = true;
+    }
+    
+    for (auto& p : particles) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.vx += 0.05f; // wind
+      p.vy += 0.02f; // gravity slightly less than wind
+      p.life--;
+    }
+    particles.erase(std::remove_if(particles.begin(), particles.end(), [](const Particle& p) { return p.life <= 0; }), particles.end());
+    
+    Uint32 current_time = SDL_GetTicks();
+    float progress = (current_time - clear_anim_start_time) / 2500.0f; // 2.5 seconds
+    if (progress > 1.0f) progress = 1.0f;
+    
+    int max_radius = std::max(segmentation.get_width(), segmentation.get_height()) * 1.5f;
+    int current_radius = (int)(max_radius * progress);
+    
+    // To calculate prev_radius smoothly
+    static int prev_radius = 0;
+    if (progress == 0.0f) prev_radius = 0;
+    
+    if (retro_texture && clear_retro_surf && current_radius > prev_radius) {
+       SDL_LockSurface(clear_retro_surf);
+       Uint32* format_pixels = (Uint32*)clear_retro_surf->pixels;
+       int w = segmentation.get_width();
+       int h = segmentation.get_height();
+       int pitch = clear_retro_surf->pitch / 4;
+       
+       int min_x = std::max(0, clear_click_x - current_radius);
+       int max_x = std::min(w - 1, clear_click_x + current_radius);
+       int min_y = std::max(0, clear_click_y - current_radius);
+       int max_y = std::min(h - 1, clear_click_y + current_radius);
+       
+       SDL_PixelFormat* fmt = clear_retro_surf->format;
+       
+       for (int y = min_y; y <= max_y; ++y) {
+           for (int x = min_x; x <= max_x; ++x) {
+               int dx = x - clear_click_x;
+               int dy = y - clear_click_y;
+               int dist_sq = dx * dx + dy * dy;
+               
+               // If pixel is in the newly expanded ring
+               if (dist_sq <= current_radius * current_radius && dist_sq > prev_radius * prev_radius) {
+                   Uint32 current_color = format_pixels[y * pitch + x];
+                   if (current_color != 0) { 
+                       Uint8 r, g, b, a;
+                       SDL_GetRGBA(current_color, fmt, &r, &g, &b, &a);
+                       format_pixels[y * pitch + x] = 0; // Make transparent
+                       
+                       // Spawn particle
+                       if ((std::rand() % 100) < 5) {
+                           Particle p;
+                           p.x = x; p.y = y;
+                           p.vx = (std::rand() % 100) / 50.0f - 1.0f + 3.0f; // drift right
+                           p.vy = (std::rand() % 100) / 50.0f - 2.0f - 2.0f; // drift up
+                           p.r = r; p.g = g; p.b = b; p.a = 255;
+                           p.max_life = p.life = 60 + std::rand() % 60;
+                           p.size = 2.0f + (std::rand() % 4);
+                           particles.push_back(p);
+                       }
+                   }
+               }
+           }
+       }
+       SDL_UnlockSurface(clear_retro_surf);
+       
+       // Update texture from surface
+       SDL_Rect update_rect = {min_x, min_y, max_x - min_x + 1, max_y - min_y + 1};
+       // Convert CPU rect to memory offset for SDL_UpdateTexture
+       Uint32* offset_pixels = format_pixels + (min_y * pitch + min_x);
+       SDL_UpdateTexture(retro_texture, &update_rect, offset_pixels, clear_retro_surf->pitch);
+       
+       prev_radius = current_radius;
+    }
   }
 }
 
@@ -750,33 +944,59 @@ void Game::render_playground() {
 
   SDL_RenderSetScale(renderer, camera_zoom, camera_zoom);
 
-  // Draw pieces on board
-  for (int i = 0; i < pieces.size(); ++i) {
-    if (uf.find(i) == i && i != dragged_root) {
-      if (in_inventory[i])
-        continue;
+  if (state == GameState::CLEARED) {
+      int root = uf.find(0);
+      const auto &p = pieces[root];
 
-      if (piece_textures.find(i) != piece_textures.end()) {
-        const auto &pt = piece_textures[i];
-        const auto &p = pieces[i];
+      SDL_FRect dst = {(float)p.offset_x + camera_x / camera_zoom,
+                       (float)p.offset_y + camera_y / camera_zoom,
+                       (float)segmentation.get_width(), (float)segmentation.get_height()};
+                       
+      if (original_texture) {
+          SDL_RenderCopyF(renderer, original_texture, NULL, &dst);
+      }
+      if (retro_texture) {
+          SDL_RenderCopyF(renderer, retro_texture, NULL, &dst);
+      }
+      
+      // Render particles
+      for (const auto& part : particles) {
+          Uint8 alpha = part.a * part.life / part.max_life;
+          SDL_SetRenderDrawColor(renderer, part.r, part.g, part.b, alpha);
+          SDL_FRect pdst = {(float)p.offset_x + part.x + camera_x / camera_zoom,
+                            (float)p.offset_y + part.y + camera_y / camera_zoom,
+                            part.size, part.size};
+          SDL_RenderFillRectF(renderer, &pdst);
+      }
+  } else {
+    // Draw pieces on board
+    for (int i = 0; i < pieces.size(); ++i) {
+      if (uf.find(i) == i && i != dragged_root) {
+        if (in_inventory[i])
+          continue;
+
+        if (piece_textures.find(i) != piece_textures.end()) {
+          const auto &pt = piece_textures[i];
+          const auto &p = pieces[i];
+
+          SDL_FRect dst = {(float)pt.min_x + p.offset_x + camera_x / camera_zoom,
+                           (float)pt.min_y + p.offset_y + camera_y / camera_zoom,
+                           (float)pt.w, (float)pt.h};
+          SDL_RenderCopyF(renderer, pt.texture, NULL, &dst);
+        }
+      }
+    }
+
+    if (dragged_root != -1) {
+      if (piece_textures.find(dragged_root) != piece_textures.end()) {
+        const auto &pt = piece_textures[dragged_root];
+        const auto &p = pieces[dragged_root];
 
         SDL_FRect dst = {(float)pt.min_x + p.offset_x + camera_x / camera_zoom,
                          (float)pt.min_y + p.offset_y + camera_y / camera_zoom,
                          (float)pt.w, (float)pt.h};
         SDL_RenderCopyF(renderer, pt.texture, NULL, &dst);
       }
-    }
-  }
-
-  if (dragged_root != -1) {
-    if (piece_textures.find(dragged_root) != piece_textures.end()) {
-      const auto &pt = piece_textures[dragged_root];
-      const auto &p = pieces[dragged_root];
-
-      SDL_FRect dst = {(float)pt.min_x + p.offset_x + camera_x / camera_zoom,
-                       (float)pt.min_y + p.offset_y + camera_y / camera_zoom,
-                       (float)pt.w, (float)pt.h};
-      SDL_RenderCopyF(renderer, pt.texture, NULL, &dst);
     }
   }
 
@@ -810,6 +1030,19 @@ void Game::clean() {
       SDL_DestroyTexture(pair.second.texture);
   }
   piece_textures.clear();
+
+  if (original_texture) {
+    SDL_DestroyTexture(original_texture);
+    original_texture = nullptr;
+  }
+  if (retro_texture) {
+    SDL_DestroyTexture(retro_texture);
+    retro_texture = nullptr;
+  }
+  if (clear_retro_surf) {
+    SDL_FreeSurface(clear_retro_surf);
+    clear_retro_surf = nullptr;
+  }
 
   segmentation.cleanup();
   if (audio_device != 0) {

@@ -16,6 +16,15 @@ struct PieceTexture {
   int h = 0;
 };
 
+struct Particle {
+  float x, y;
+  float vx, vy;
+  Uint8 r, g, b, a;
+  int life;
+  int max_life;
+  float size;
+};
+
 enum class GameState { MENU, PLAYING, CLEARED };
 
 class Game {
@@ -44,6 +53,7 @@ private:
   SDL_AudioDeviceID audio_device;
   void init_audio();
   void play_snap_sound();
+  void play_clear_sound();
 
   Segmentation segmentation;
   std::unique_ptr<PuzzleBoard> board;
@@ -73,6 +83,16 @@ private:
 
   // Texture Cache
   std::unordered_map<int, PieceTexture> piece_textures;
+
+  // Clear animation state
+  Uint32 clear_anim_start_time;
+  int clear_click_x;
+  int clear_click_y;
+  SDL_Texture* original_texture;
+  SDL_Texture* retro_texture;
+  SDL_Surface* clear_retro_surf;
+  std::vector<Particle> particles;
+  bool clear_sound_played;
 
   // Helper functions
   bool is_mouse_over_sidebar(int x);
