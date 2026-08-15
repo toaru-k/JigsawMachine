@@ -31,9 +31,9 @@ std::vector<int> PuzzleBoard::near_piece(int idx) {
     if (nroot == root) continue;
     
     Piece &np = pieces[nroot];
-    long distance = 
-        (p.offset_x - np.offset_x) * (p.offset_x - np.offset_x) +
-        (p.offset_y - np.offset_y) * (p.offset_y - np.offset_y);
+    long long dx = p.offset_x - np.offset_x;
+    long long dy = p.offset_y - np.offset_y;
+    long long distance = dx * dx + dy * dy;
 
     if (distance < UNITE_DISTANCE) {
       nids.push_back(nroot);
