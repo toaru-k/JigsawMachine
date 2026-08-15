@@ -84,6 +84,7 @@ private:
   void move_piece_to_board(int piece_id, int mouse_x, int mouse_y);
   void generate_texture(int piece_id);
   void clean_textures();
+  void draw_text(const char* text, int x, int y, int scale = 2, Uint8 r = 40, Uint8 g = 40, Uint8 b = 40);
 };
 
 #endif // GAME_H

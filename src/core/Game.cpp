@@ -1,4 +1,5 @@
 #include "Game.h"
+#include "../graphics/Font.h"
 #include <algorithm>
 #include <cmath>
 #include <iostream>
@@ -13,7 +14,7 @@
 
 #define UI_OFFSET 10
 #define INVENTORY_COL_NUM 2
-#define INVENTORY_ROW_NUM 5
+#define INVENTORY_ROW_NUM 4
 
 Game::Game()
     : is_running(false), window(nullptr), renderer(nullptr),
@@ -105,6 +106,29 @@ void Game::play_snap_sound() {
   }
 
   SDL_QueueAudio(audio_device, buffer.data(), buffer.size() * sizeof(int16_t));
+}
+
+void Game::draw_text(const char *text, int x, int y, int scale, Uint8 r,
+                     Uint8 g, Uint8 b) {
+  SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+  int cursor_x = x;
+  while (*text) {
+    uint64_t mask = get_char_bitmask(*text);
+    if (mask != 0) {
+      for (int row = 0; row < 7; ++row) {
+        int shift = 30 - (row * 5);
+        for (int col = 0; col < 5; ++col) {
+          if ((mask >> (shift + 4 - col)) & 1) {
+            SDL_Rect p = {cursor_x + col * scale, y + row * scale, scale,
+                          scale};
+            SDL_RenderFillRect(renderer, &p);
+          }
+        }
+      }
+    }
+    cursor_x += 6 * scale; // 5px width + 1px spacing
+    text++;
+  }
 }
 
 void Game::generate_texture(int piece_id) {
@@ -616,6 +640,15 @@ void Game::render_inventory() {
                        sidebar_rect.y + sidebar_rect.h - 1 - i);
   }
 
+  SDL_Rect inv_band = {sidebar_rect.x + inv_border, sidebar_rect.y + inv_border,
+                       sidebar_rect.w - 2 * inv_border, 24};
+  SDL_SetRenderDrawColor(renderer, 0x20, 0x10, 0x60, 255);
+  SDL_RenderFillRect(renderer, &inv_band);
+
+  int text_w = 9 * 6 * 2; // "Inventory" is 9 chars
+  draw_text("Inventory", sidebar_rect.x + (sidebar_rect.w - text_w) / 2,
+            sidebar_rect.y + 8, 2, 255, 255, 255);
+
   if (state == GameState::PLAYING) {
     int page_size = INVENTORY_COL_NUM * INVENTORY_ROW_NUM;
     int start_idx = inventory_page * page_size;
@@ -652,6 +685,17 @@ void Game::render_inventory() {
     int rx = window_width - sidebar_width / 2 + 40;
     SDL_RenderDrawLine(renderer, rx, my, rx - 15, my - 10);
     SDL_RenderDrawLine(renderer, rx, my, rx - 15, my + 10);
+
+    int max_pages = (inventory_pieces.size() + page_size - 1) / page_size;
+    if (max_pages == 0)
+      max_pages = 1;
+    char page_str[16];
+    snprintf(page_str, sizeof(page_str), "%d/%d", inventory_page + 1,
+             max_pages);
+    int p_w = 0;
+    for (int i = 0; page_str[i]; ++i)
+      p_w += 6 * 2;
+    draw_text(page_str, window_width - sidebar_width / 2 - p_w / 2, my - 7, 2);
   }
 }
 
@@ -683,15 +727,25 @@ void Game::render_playground() {
                        playground_rect.y + playground_rect.h - 1 - i);
   }
 
+  SDL_Rect pg_band = {playground_rect.x + pg_border,
+                      playground_rect.y + pg_border,
+                      playground_rect.w - 2 * pg_border, 24};
+  SDL_SetRenderDrawColor(renderer, 0x20, 0x10, 0x60, 255);
+  SDL_RenderFillRect(renderer, &pg_band);
+
+  draw_text("Playground", playground_rect.x + 10, playground_rect.y + 8, 2, 255,
+            255, 255);
+
   auto &pieces = segmentation.get_pieces();
   auto &uf = segmentation.get_uf();
 
   int dragged_root =
       (selected_piece_id != -1) ? uf.find(selected_piece_id) : -1;
 
-  SDL_Rect clip_rect = {
-      playground_rect.x + pg_border, playground_rect.y + pg_border,
-      playground_rect.w - 2 * pg_border, playground_rect.h - 2 * pg_border};
+  SDL_Rect clip_rect = {playground_rect.x + pg_border,
+                        playground_rect.y + pg_border + 24,
+                        playground_rect.w - 2 * pg_border,
+                        playground_rect.h - 2 * pg_border - 24};
   SDL_RenderSetClipRect(renderer, &clip_rect);
 
   SDL_RenderSetScale(renderer, camera_zoom, camera_zoom);
