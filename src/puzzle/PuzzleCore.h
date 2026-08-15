@@ -22,6 +22,7 @@ public:
   int find(int x);
   bool same(int x, int y);
   void unite(int x, int y);
+  std::vector<int>& get_parents() { return parents; }
 
 private:
   std::vector<int> parents;

@@ -12,7 +12,7 @@ public:
   int orig_w, orig_h;
   unsigned char *original_data;
 
-  bool init(const char *filepath, int max_dimension = 400);
+  bool init(const char *filepath, int max_dimension = 400, bool skip_process = false);
   void cleanup();
 
   std::vector<Piece> &get_pieces() { return pieces; }

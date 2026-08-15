@@ -2,7 +2,9 @@
 #include "../graphics/Font.h"
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <iostream>
+#include <vector>
 #include <windows.h>
 
 #ifndef M_PI
@@ -23,7 +25,8 @@ Game::Game()
       camera_zoom(1.0f), is_panning(false), grab_offset_x(0.0f),
       grab_offset_y(0.0f), sidebar_width(200), inventory_page(0),
       clear_anim_start_time(0), clear_click_x(0), clear_click_y(0),
-      original_texture(nullptr), retro_texture(nullptr), clear_retro_surf(nullptr), clear_sound_played(false) {}
+      original_texture(nullptr), retro_texture(nullptr),
+      clear_retro_surf(nullptr), clear_sound_played(false) {}
 
 Game::~Game() { clean(); }
 
@@ -133,8 +136,10 @@ void Game::play_clear_sound() {
     int note_sample = i % samples_per_note;
     float volume = 1.0f - (float)note_sample / samples_per_note;
     if (note_idx == num_notes - 1) {
-      volume = 1.0f - (float)note_sample / (samples_per_note * 2.0f); // Last note rings out longer
-      if (volume < 0.0f) volume = 0.0f;
+      volume = 1.0f - (float)note_sample / (samples_per_note *
+                                            2.0f); // Last note rings out longer
+      if (volume < 0.0f)
+        volume = 0.0f;
     }
 
     // Square wave + slight duty cycle variation
@@ -347,6 +352,217 @@ void Game::open_file_dialog() {
   }
 }
 
+void Game::save_game_dialog() {
+  if (state != GameState::PLAYING && state != GameState::CLEARED)
+    return;
+  OPENFILENAMEA ofn;
+  char szFile[260];
+  ZeroMemory(&ofn, sizeof(ofn));
+  ofn.lStructSize = sizeof(ofn);
+  ofn.hwndOwner = NULL;
+  ofn.lpstrFile = szFile;
+  ofn.lpstrFile[0] = '\0';
+  ofn.nMaxFile = sizeof(szFile);
+  ofn.lpstrFilter = "Save Files (*.sav)\0*.sav\0All Files (*.*)\0*.*\0";
+  ofn.nFilterIndex = 1;
+  ofn.lpstrFileTitle = NULL;
+  ofn.nMaxFileTitle = 0;
+  ofn.lpstrInitialDir = NULL;
+  ofn.lpstrDefExt = "sav";
+  ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+
+  if (GetSaveFileNameA(&ofn) == TRUE) {
+    if (save_game(ofn.lpstrFile)) {
+      std::cout << "Game saved to: " << ofn.lpstrFile << std::endl;
+    } else {
+      std::cerr << "Failed to save game!" << std::endl;
+    }
+  }
+}
+
+void Game::load_game_dialog() {
+  OPENFILENAMEA ofn;
+  char szFile[260];
+  ZeroMemory(&ofn, sizeof(ofn));
+  ofn.lStructSize = sizeof(ofn);
+  ofn.hwndOwner = NULL;
+  ofn.lpstrFile = szFile;
+  ofn.lpstrFile[0] = '\0';
+  ofn.nMaxFile = sizeof(szFile);
+  ofn.lpstrFilter = "Save Files (*.sav)\0*.sav\0All Files (*.*)\0*.*\0";
+  ofn.nFilterIndex = 1;
+  ofn.lpstrFileTitle = NULL;
+  ofn.nMaxFileTitle = 0;
+  ofn.lpstrInitialDir = NULL;
+  ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+
+  if (GetOpenFileNameA(&ofn) == TRUE) {
+    if (load_game(ofn.lpstrFile)) {
+      std::cout << "Game loaded from: " << ofn.lpstrFile << std::endl;
+    } else {
+      std::cerr << "Failed to load game!" << std::endl;
+    }
+  }
+}
+
+bool Game::save_game(const std::string &filepath) {
+  std::FILE *f = std::fopen(filepath.c_str(), "wb");
+  if (!f)
+    return false;
+
+  std::fwrite("JGSM", 1, 4, f);
+
+  int w = segmentation.get_width();
+  int h = segmentation.get_height();
+  std::fwrite(&w, sizeof(int), 1, f);
+  std::fwrite(&h, sizeof(int), 1, f);
+
+  std::FILE *img_f = std::fopen(pending_filepath.c_str(), "rb");
+  if (!img_f) {
+    std::fclose(f);
+    return false;
+  }
+  std::fseek(img_f, 0, SEEK_END);
+  size_t img_size = std::ftell(img_f);
+  std::fseek(img_f, 0, SEEK_SET);
+
+  std::fwrite(&img_size, sizeof(size_t), 1, f);
+  std::vector<char> img_buf(img_size);
+  std::fread(img_buf.data(), 1, img_size, img_f);
+  std::fwrite(img_buf.data(), 1, img_size, f);
+  std::fclose(img_f);
+
+  auto &uf = segmentation.get_uf();
+  for (int i = 0; i < w * h; ++i) {
+    int parent = uf.find(i);
+    std::fwrite(&parent, sizeof(int), 1, f);
+  }
+
+  auto &pieces = segmentation.get_pieces();
+  int num_roots = 0;
+  for (int i = 0; i < pieces.size(); ++i) {
+    if (uf.find(i) == i && pieces[i].num_pixels > 0)
+      num_roots++;
+  }
+  std::fwrite(&num_roots, sizeof(int), 1, f);
+
+  for (int i = 0; i < pieces.size(); ++i) {
+    if (uf.find(i) == i && pieces[i].num_pixels > 0) {
+      std::fwrite(&i, sizeof(int), 1, f);
+      std::fwrite(&pieces[i].offset_x, sizeof(int), 1, f);
+      std::fwrite(&pieces[i].offset_y, sizeof(int), 1, f);
+      bool inv = false;
+      if (i < in_inventory.size() && in_inventory[i])
+        inv = true;
+      std::fwrite(&inv, sizeof(bool), 1, f);
+    }
+  }
+
+  std::fclose(f);
+  return true;
+}
+
+bool Game::load_game(const std::string &filepath) {
+  std::FILE *f = std::fopen(filepath.c_str(), "rb");
+  if (!f)
+    return false;
+
+  char magic[5] = {0};
+  std::fread(magic, 1, 4, f);
+  if (std::string(magic) != "JGSM") {
+    std::fclose(f);
+    return false;
+  }
+
+  int w, h;
+  std::fread(&w, sizeof(int), 1, f);
+  std::fread(&h, sizeof(int), 1, f);
+
+  size_t img_size;
+  std::fread(&img_size, sizeof(size_t), 1, f);
+  std::vector<char> img_buf(img_size);
+  std::fread(img_buf.data(), 1, img_size, f);
+
+  std::string temp_img_path = "temp_loaded_image.dat";
+  std::FILE *tmp_f = std::fopen(temp_img_path.c_str(), "wb");
+  if (tmp_f) {
+    std::fwrite(img_buf.data(), 1, img_size, tmp_f);
+    std::fclose(tmp_f);
+  }
+
+  pending_filepath = temp_img_path;
+
+  for (auto &pair : piece_textures) {
+    if (pair.second.texture)
+      SDL_DestroyTexture(pair.second.texture);
+  }
+  piece_textures.clear();
+
+  if (original_texture) {
+    SDL_DestroyTexture(original_texture);
+    original_texture = nullptr;
+  }
+  if (retro_texture) {
+    SDL_DestroyTexture(retro_texture);
+    retro_texture = nullptr;
+  }
+  if (clear_retro_surf) {
+    SDL_FreeSurface(clear_retro_surf);
+    clear_retro_surf = nullptr;
+  }
+  segmentation.cleanup();
+
+  int max_dim = std::max(w, h);
+  if (!segmentation.init(pending_filepath.c_str(), max_dim, true)) {
+    std::fclose(f);
+    return false;
+  }
+
+  auto &uf = segmentation.get_uf();
+  auto &parents = uf.get_parents();
+  for (int i = 0; i < w * h; ++i) {
+    int parent;
+    std::fread(&parent, sizeof(int), 1, f);
+    parents[i] = parent;
+  }
+
+  auto &pieces = segmentation.get_pieces();
+  post_unite_pieces(pieces, uf);
+
+  int num_roots;
+  std::fread(&num_roots, sizeof(int), 1, f);
+
+  in_inventory.assign(pieces.size(), false);
+  inventory_pieces.clear();
+  inventory_page = 0;
+
+  for (int i = 0; i < num_roots; ++i) {
+    int id;
+    std::fread(&id, sizeof(int), 1, f);
+    std::fread(&pieces[id].offset_x, sizeof(int), 1, f);
+    std::fread(&pieces[id].offset_y, sizeof(int), 1, f);
+    bool inv;
+    std::fread(&inv, sizeof(bool), 1, f);
+    if (inv) {
+      in_inventory[id] = true;
+      inventory_pieces.push_back(id);
+    }
+    generate_texture(id);
+  }
+
+  board = std::make_unique<PuzzleBoard>(
+      segmentation.get_pieces(), segmentation.get_uf(),
+      segmentation.get_width(), segmentation.get_height());
+
+  camera_x = 50.0f;
+  camera_y = 50.0f;
+  camera_zoom = 1.0f;
+  state = GameState::PLAYING;
+
+  std::fclose(f);
+  return true;
+}
+
 void Game::get_inventory_slot_rect(int slot_index, SDL_Rect &rect) {
   int cols = INVENTORY_COL_NUM;
   int rows = INVENTORY_ROW_NUM;
@@ -432,41 +648,41 @@ void Game::handle_events() {
 
           if (state == GameState::PLAYING) {
             for (int i = pieces.size() - 1; i >= 0; --i) {
-            if (uf.find(i) == i) {
-              if (in_inventory[i])
-                continue;
+              if (uf.find(i) == i) {
+                if (in_inventory[i])
+                  continue;
 
-              const auto &p = pieces[i];
-              if (piece_textures.find(i) == piece_textures.end())
-                continue;
-              const auto &pt = piece_textures[i];
+                const auto &p = pieces[i];
+                if (piece_textures.find(i) == piece_textures.end())
+                  continue;
+                const auto &pt = piece_textures[i];
 
-              // Quick bounding box check
-              float margin = PIECE_GRAB_MARGIN / camera_zoom;
-              float px = pt.min_x + p.offset_x;
-              float py = pt.min_y + p.offset_y;
-              if (world_x >= px - margin && world_x <= px + pt.w + margin &&
-                  world_y >= py - margin && world_y <= py + pt.h + margin) {
+                // Quick bounding box check
+                float margin = PIECE_GRAB_MARGIN / camera_zoom;
+                float px = pt.min_x + p.offset_x;
+                float py = pt.min_y + p.offset_y;
+                if (world_x >= px - margin && world_x <= px + pt.w + margin &&
+                    world_y >= py - margin && world_y <= py + pt.h + margin) {
 
-                bool hit = false;
-                for (const auto &pix : p.pixels) {
-                  float px_pix = pix.first + p.offset_x;
-                  float py_pix = pix.second + p.offset_y;
-                  if (std::abs(px_pix - world_x) <= margin + 0.5f &&
-                      std::abs(py_pix - world_y) <= margin + 0.5f) {
-                    hit = true;
+                  bool hit = false;
+                  for (const auto &pix : p.pixels) {
+                    float px_pix = pix.first + p.offset_x;
+                    float py_pix = pix.second + p.offset_y;
+                    if (std::abs(px_pix - world_x) <= margin + 0.5f &&
+                        std::abs(py_pix - world_y) <= margin + 0.5f) {
+                      hit = true;
+                      break;
+                    }
+                  }
+                  if (hit) {
+                    hit_piece_id = i;
+                    hit_grab_x = p.offset_x - world_x;
+                    hit_grab_y = p.offset_y - world_y;
                     break;
                   }
                 }
-                if (hit) {
-                  hit_piece_id = i;
-                  hit_grab_x = p.offset_x - world_x;
-                  hit_grab_y = p.offset_y - world_y;
-                  break;
-                }
               }
             }
-          }
           }
         }
 
@@ -481,11 +697,23 @@ void Game::handle_events() {
           }
         } else if (event.button.button == SDL_BUTTON_LEFT) {
           if (in_sidebar) {
-            // Load Image button
-            if (event.button.y >= 15 && event.button.y <= 65 &&
-                event.button.x >= window_width - sidebar_width + 20 &&
-                event.button.x <= window_width - sidebar_width + 60) {
-              open_file_dialog();
+            // Menu buttons
+            if (event.button.y >= UI_OFFSET &&
+                event.button.y <= UI_OFFSET + 50) {
+              int btn_w = (sidebar_width - 4 * UI_OFFSET) / 3;
+              int bx1 = window_width - sidebar_width + UI_OFFSET;
+              int bx2 = bx1 + btn_w + UI_OFFSET;
+              int bx3 = bx2 + btn_w + UI_OFFSET;
+
+              if (event.button.x >= bx1 && event.button.x < bx1 + btn_w) {
+                open_file_dialog();
+              } else if (event.button.x >= bx2 &&
+                         event.button.x < bx2 + btn_w) {
+                save_game_dialog();
+              } else if (event.button.x >= bx3 &&
+                         event.button.x <= bx3 + btn_w) {
+                load_game_dialog();
+              }
             }
             // Pagination
             if (event.button.y >= window_height - 50) {
@@ -577,76 +805,93 @@ void Game::handle_events() {
                 clear_anim_start_time = SDL_GetTicks();
                 clear_sound_played = false;
                 clear_anim_prev_radius = 0;
-                
+
                 // Get the position of the click in the puzzle image space
-                auto& pieces = segmentation.get_pieces();
-                int root = segmentation.get_uf().find(0); // Everything is one piece now
-                
+                auto &pieces = segmentation.get_pieces();
+                int root = segmentation.get_uf().find(
+                    0); // Everything is one piece now
+
                 float world_x = (event.button.x - camera_x) / camera_zoom;
                 float world_y = (event.button.y - camera_y) / camera_zoom;
-                
+
                 clear_click_x = (int)world_x - pieces[root].offset_x;
                 clear_click_y = (int)world_y - pieces[root].offset_y;
-                
+
                 // If the user clicked outside the image somehow, clamp it
-                if (clear_click_x < 0) clear_click_x = 0;
-                if (clear_click_x >= segmentation.get_width()) clear_click_x = segmentation.get_width() - 1;
-                if (clear_click_y < 0) clear_click_y = 0;
-                if (clear_click_y >= segmentation.get_height()) clear_click_y = segmentation.get_height() - 1;
+                if (clear_click_x < 0)
+                  clear_click_x = 0;
+                if (clear_click_x >= segmentation.get_width())
+                  clear_click_x = segmentation.get_width() - 1;
+                if (clear_click_y < 0)
+                  clear_click_y = 0;
+                if (clear_click_y >= segmentation.get_height())
+                  clear_click_y = segmentation.get_height() - 1;
 
                 // We will generate the original and retro textures here
                 SDL_Surface *orig_surf = SDL_CreateRGBSurfaceWithFormat(
-                    0, segmentation.orig_w, segmentation.orig_h, 32, SDL_PIXELFORMAT_RGBA32);
-                if (clear_retro_surf) SDL_FreeSurface(clear_retro_surf);
+                    0, segmentation.orig_w, segmentation.orig_h, 32,
+                    SDL_PIXELFORMAT_RGBA32);
+                if (clear_retro_surf)
+                  SDL_FreeSurface(clear_retro_surf);
                 clear_retro_surf = SDL_CreateRGBSurfaceWithFormat(
-                    0, segmentation.get_width(), segmentation.get_height(), 32, SDL_PIXELFORMAT_RGBA32);
-                
+                    0, segmentation.get_width(), segmentation.get_height(), 32,
+                    SDL_PIXELFORMAT_RGBA32);
+
                 SDL_LockSurface(orig_surf);
                 SDL_LockSurface(clear_retro_surf);
                 Uint32 *orig_pixels = (Uint32 *)orig_surf->pixels;
                 Uint32 *retro_pixels = (Uint32 *)clear_retro_surf->pixels;
                 int orig_pitch = orig_surf->pitch / 4;
                 int retro_pitch = clear_retro_surf->pitch / 4;
-                
+
                 for (int y = 0; y < segmentation.orig_h; ++y) {
                   for (int x = 0; x < segmentation.orig_w; ++x) {
                     int idx = (y * segmentation.orig_w + x) * 3;
                     unsigned char r = segmentation.original_data[idx + 0];
                     unsigned char g = segmentation.original_data[idx + 1];
                     unsigned char b = segmentation.original_data[idx + 2];
-                    orig_pixels[y * orig_pitch + x] = SDL_MapRGBA(orig_surf->format, r, g, b, 255);
+                    orig_pixels[y * orig_pitch + x] =
+                        SDL_MapRGBA(orig_surf->format, r, g, b, 255);
                   }
                 }
-                
+
                 for (int y = 0; y < segmentation.get_height(); ++y) {
                   for (int x = 0; x < segmentation.get_width(); ++x) {
                     int idx = (y * segmentation.get_width() + x) * 3;
                     unsigned char r = segmentation.data[idx + 0];
                     unsigned char g = segmentation.data[idx + 1];
                     unsigned char b = segmentation.data[idx + 2];
-                    
+
                     // Retro is masked
                     unsigned char rr = r & 0xf0;
                     unsigned char rg = g & 0xf0;
                     unsigned char rb = b & 0xf0;
-                    retro_pixels[y * retro_pitch + x] = SDL_MapRGBA(clear_retro_surf->format, rr, rg, rb, 255);
+                    retro_pixels[y * retro_pitch + x] =
+                        SDL_MapRGBA(clear_retro_surf->format, rr, rg, rb, 255);
                   }
                 }
                 SDL_UnlockSurface(clear_retro_surf);
                 SDL_UnlockSurface(orig_surf);
-                
-                if (original_texture) SDL_DestroyTexture(original_texture);
-                original_texture = SDL_CreateTextureFromSurface(renderer, orig_surf);
+
+                if (original_texture)
+                  SDL_DestroyTexture(original_texture);
+                original_texture =
+                    SDL_CreateTextureFromSurface(renderer, orig_surf);
                 SDL_SetTextureBlendMode(original_texture, SDL_BLENDMODE_BLEND);
-                
-                if (retro_texture) SDL_DestroyTexture(retro_texture);
-                retro_texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STREAMING, segmentation.get_width(), segmentation.get_height());
+
+                if (retro_texture)
+                  SDL_DestroyTexture(retro_texture);
+                retro_texture = SDL_CreateTexture(
+                    renderer, SDL_PIXELFORMAT_RGBA32,
+                    SDL_TEXTUREACCESS_STREAMING, segmentation.get_width(),
+                    segmentation.get_height());
                 SDL_SetTextureBlendMode(retro_texture, SDL_BLENDMODE_BLEND);
-                
-                SDL_UpdateTexture(retro_texture, NULL, clear_retro_surf->pixels, clear_retro_surf->pitch);
-                
+
+                SDL_UpdateTexture(retro_texture, NULL, clear_retro_surf->pixels,
+                                  clear_retro_surf->pitch);
+
                 SDL_FreeSurface(orig_surf);
-                
+
                 particles.clear();
               }
             }
@@ -659,30 +904,47 @@ void Game::handle_events() {
       bool in_sidebar = is_mouse_over_sidebar(event.button.x);
       if (event.type == SDL_MOUSEBUTTONDOWN &&
           event.button.button == SDL_BUTTON_LEFT) {
-        if (in_sidebar && event.button.y >= 15 && event.button.y <= 65 &&
-            event.button.x >= window_width - sidebar_width + 20 &&
-            event.button.x <= window_width - sidebar_width + 60) {
-          open_file_dialog();
+        if (in_sidebar) {
+          if (event.button.y >= UI_OFFSET && event.button.y <= UI_OFFSET + 50) {
+            int btn_w = (sidebar_width - 4 * UI_OFFSET) / 3;
+            int bx1 = window_width - sidebar_width + UI_OFFSET;
+            int bx2 = bx1 + btn_w + UI_OFFSET;
+            int bx3 = bx2 + btn_w + UI_OFFSET;
+
+            if (event.button.x >= bx1 && event.button.x < bx1 + btn_w) {
+              open_file_dialog();
+            } else if (event.button.x >= bx2 && event.button.x < bx2 + btn_w) {
+              // save_game_dialog() is ignored in MENU state
+            } else if (event.button.x >= bx3 && event.button.x <= bx3 + btn_w) {
+              load_game_dialog();
+            }
+          }
         }
       }
     } else if (state == GameState::DIFFICULTY_SELECT) {
-      if (event.type == SDL_MOUSEBUTTONDOWN && event.button.button == SDL_BUTTON_LEFT) {
+      if (event.type == SDL_MOUSEBUTTONDOWN &&
+          event.button.button == SDL_BUTTON_LEFT) {
         int x = event.button.x;
         int y = event.button.y;
-        SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300, 240};
-        
+        SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300,
+                          240};
+
         SDL_Rect btn1 = {modal.x + 50, modal.y + 60, 200, 30};
         SDL_Rect btn2 = {modal.x + 50, modal.y + 100, 200, 30};
         SDL_Rect btn3 = {modal.x + 50, modal.y + 140, 200, 30};
         SDL_Rect btn4 = {modal.x + 50, modal.y + 180, 200, 30};
-        
-        if (x >= btn1.x && x <= btn1.x + btn1.w && y >= btn1.y && y <= btn1.y + btn1.h) {
+
+        if (x >= btn1.x && x <= btn1.x + btn1.w && y >= btn1.y &&
+            y <= btn1.y + btn1.h) {
           start_puzzle(100); // Easy
-        } else if (x >= btn2.x && x <= btn2.x + btn2.w && y >= btn2.y && y <= btn2.y + btn2.h) {
+        } else if (x >= btn2.x && x <= btn2.x + btn2.w && y >= btn2.y &&
+                   y <= btn2.y + btn2.h) {
           start_puzzle(250); // Normal
-        } else if (x >= btn3.x && x <= btn3.x + btn3.w && y >= btn3.y && y <= btn3.y + btn3.h) {
+        } else if (x >= btn3.x && x <= btn3.x + btn3.w && y >= btn3.y &&
+                   y <= btn3.y + btn3.h) {
           start_puzzle(400); // Hard
-        } else if (x >= btn4.x && x <= btn4.x + btn4.w && y >= btn4.y && y <= btn4.y + btn4.h) {
+        } else if (x >= btn4.x && x <= btn4.x + btn4.w && y >= btn4.y &&
+                   y <= btn4.y + btn4.h) {
           start_puzzle(4000); // Very Hard
         }
       }
@@ -703,141 +965,187 @@ void Game::update() {
     if (keys[SDL_SCANCODE_D])
       camera_x -= pan_speed;
   }
-  
+
   if (state == GameState::CLEARED) {
     if (!clear_sound_played) {
       play_clear_sound();
       clear_sound_played = true;
     }
-    
-    for (auto& p : particles) {
+
+    for (auto &p : particles) {
       p.x += p.vx;
       p.y += p.vy;
       p.vx += 0.05f; // wind
       p.vy += 0.02f; // gravity slightly less than wind
       p.life--;
     }
-    particles.erase(std::remove_if(particles.begin(), particles.end(), [](const Particle& p) { return p.life <= 0; }), particles.end());
-    
+    particles.erase(
+        std::remove_if(particles.begin(), particles.end(),
+                       [](const Particle &p) { return p.life <= 0; }),
+        particles.end());
+
     Uint32 current_time = SDL_GetTicks();
-    float progress = (current_time - clear_anim_start_time) / 2500.0f; // 2.5 seconds
-    if (progress > 1.0f) progress = 1.0f;
-    
-    int max_radius = std::max(segmentation.get_width(), segmentation.get_height()) * 1.5f;
+    float progress =
+        (current_time - clear_anim_start_time) / 2500.0f; // 2.5 seconds
+    if (progress > 1.0f)
+      progress = 1.0f;
+
+    int max_radius =
+        std::max(segmentation.get_width(), segmentation.get_height()) * 1.5f;
     int current_radius = (int)(max_radius * progress);
-    
-    if (retro_texture && clear_retro_surf && current_radius > clear_anim_prev_radius) {
-       SDL_LockSurface(clear_retro_surf);
-       Uint32* format_pixels = (Uint32*)clear_retro_surf->pixels;
-       int w = segmentation.get_width();
-       int h = segmentation.get_height();
-       int pitch = clear_retro_surf->pitch / 4;
-       
-       int min_x = std::max(0, clear_click_x - current_radius);
-       int max_x = std::min(w - 1, clear_click_x + current_radius);
-       int min_y = std::max(0, clear_click_y - current_radius);
-       int max_y = std::min(h - 1, clear_click_y + current_radius);
-       
-       SDL_PixelFormat* fmt = clear_retro_surf->format;
-       
-       for (int y = min_y; y <= max_y; ++y) {
-           for (int x = min_x; x <= max_x; ++x) {
-               int dx = x - clear_click_x;
-               int dy = y - clear_click_y;
-               int dist_sq = dx * dx + dy * dy;
-               
-               // If pixel is in the newly expanded ring
-               if (dist_sq <= current_radius * current_radius && dist_sq > clear_anim_prev_radius * clear_anim_prev_radius) {
-                   Uint32 current_color = format_pixels[y * pitch + x];
-                   if (current_color != 0) { 
-                       Uint8 r, g, b, a;
-                       SDL_GetRGBA(current_color, fmt, &r, &g, &b, &a);
-                       format_pixels[y * pitch + x] = 0; // Make transparent
-                       
-                       // Spawn particle
-                       if ((std::rand() % 100) < 5) {
-                           Particle p;
-                           p.x = x; p.y = y;
-                           p.vx = (std::rand() % 100) / 50.0f - 1.0f + 3.0f; // drift right
-                           p.vy = (std::rand() % 100) / 50.0f - 2.0f - 2.0f; // drift up
-                           p.r = r; p.g = g; p.b = b; p.a = 255;
-                           p.max_life = p.life = 60 + std::rand() % 60;
-                           p.size = 2.0f + (std::rand() % 4);
-                           particles.push_back(p);
-                       }
-                   }
-               }
-           }
-       }
-       SDL_UnlockSurface(clear_retro_surf);
-       
-       // Update texture from surface
-       SDL_Rect update_rect = {min_x, min_y, max_x - min_x + 1, max_y - min_y + 1};
-       // Convert CPU rect to memory offset for SDL_UpdateTexture
-       Uint32* offset_pixels = format_pixels + (min_y * pitch + min_x);
-       SDL_UpdateTexture(retro_texture, &update_rect, offset_pixels, clear_retro_surf->pitch);
-       
-       clear_anim_prev_radius = current_radius;
+
+    if (retro_texture && clear_retro_surf &&
+        current_radius > clear_anim_prev_radius) {
+      SDL_LockSurface(clear_retro_surf);
+      Uint32 *format_pixels = (Uint32 *)clear_retro_surf->pixels;
+      int w = segmentation.get_width();
+      int h = segmentation.get_height();
+      int pitch = clear_retro_surf->pitch / 4;
+
+      int min_x = std::max(0, clear_click_x - current_radius);
+      int max_x = std::min(w - 1, clear_click_x + current_radius);
+      int min_y = std::max(0, clear_click_y - current_radius);
+      int max_y = std::min(h - 1, clear_click_y + current_radius);
+
+      SDL_PixelFormat *fmt = clear_retro_surf->format;
+
+      for (int y = min_y; y <= max_y; ++y) {
+        for (int x = min_x; x <= max_x; ++x) {
+          int dx = x - clear_click_x;
+          int dy = y - clear_click_y;
+          int dist_sq = dx * dx + dy * dy;
+
+          // If pixel is in the newly expanded ring
+          if (dist_sq <= current_radius * current_radius &&
+              dist_sq > clear_anim_prev_radius * clear_anim_prev_radius) {
+            Uint32 current_color = format_pixels[y * pitch + x];
+            if (current_color != 0) {
+              Uint8 r, g, b, a;
+              SDL_GetRGBA(current_color, fmt, &r, &g, &b, &a);
+              format_pixels[y * pitch + x] = 0; // Make transparent
+
+              // Spawn particle
+              if ((std::rand() % 100) < 5) {
+                Particle p;
+                p.x = x;
+                p.y = y;
+                p.vx = (std::rand() % 100) / 50.0f - 1.0f + 3.0f; // drift right
+                p.vy = (std::rand() % 100) / 50.0f - 2.0f - 2.0f; // drift up
+                p.r = r;
+                p.g = g;
+                p.b = b;
+                p.a = 255;
+                p.max_life = p.life = 60 + std::rand() % 60;
+                p.size = 2.0f + (std::rand() % 4);
+                particles.push_back(p);
+              }
+            }
+          }
+        }
+      }
+      SDL_UnlockSurface(clear_retro_surf);
+
+      // Update texture from surface
+      SDL_Rect update_rect = {min_x, min_y, max_x - min_x + 1,
+                              max_y - min_y + 1};
+      // Convert CPU rect to memory offset for SDL_UpdateTexture
+      Uint32 *offset_pixels = format_pixels + (min_y * pitch + min_x);
+      SDL_UpdateTexture(retro_texture, &update_rect, offset_pixels,
+                        clear_retro_surf->pitch);
+
+      clear_anim_prev_radius = current_radius;
     }
   }
 }
 
 void Game::render_menu_buttons() {
-  // Load Image Button
-  SDL_Rect btn_rect = {window_width - sidebar_width + UI_OFFSET, UI_OFFSET, 50,
-                       50};
-  SDL_SetRenderDrawColor(renderer, 0xE0, 0xE0, 0xE0, 255);
-  SDL_RenderFillRect(renderer, &btn_rect);
-  // Raised border for button
-  int btn_border = 3;
-  for (int i = 0; i < btn_border; ++i) {
-    SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 255);
-    SDL_RenderDrawLine(renderer, btn_rect.x + i, btn_rect.y + i,
-                       btn_rect.x + btn_rect.w - 1 - i, btn_rect.y + i);
-    SDL_RenderDrawLine(renderer, btn_rect.x + i, btn_rect.y + i, btn_rect.x + i,
-                       btn_rect.y + btn_rect.h - 1 - i);
-    SDL_SetRenderDrawColor(renderer, 0x40, 0x40, 0x40, 255);
-    SDL_RenderDrawLine(
-        renderer, btn_rect.x + i, btn_rect.y + btn_rect.h - 1 - i,
-        btn_rect.x + btn_rect.w - 1 - i, btn_rect.y + btn_rect.h - 1 - i);
-    SDL_RenderDrawLine(renderer, btn_rect.x + btn_rect.w - 1 - i,
-                       btn_rect.y + i, btn_rect.x + btn_rect.w - 1 - i,
-                       btn_rect.y + btn_rect.h - 1 - i);
+  int btn_w = (sidebar_width - 4 * UI_OFFSET) / 3;
+  int bx[3] = {window_width - sidebar_width + UI_OFFSET,
+               window_width - sidebar_width + 2 * UI_OFFSET + btn_w,
+               window_width - sidebar_width + 3 * UI_OFFSET + 2 * btn_w};
+
+  for (int b = 0; b < 3; ++b) {
+    SDL_Rect btn_rect = {bx[b], UI_OFFSET, btn_w, 50};
+    SDL_SetRenderDrawColor(renderer, 0xE0, 0xE0, 0xE0, 255);
+    SDL_RenderFillRect(renderer, &btn_rect);
+    int btn_border = 3;
+    for (int i = 0; i < btn_border; ++i) {
+      SDL_SetRenderDrawColor(renderer, 0xFF, 0xFF, 0xFF, 255);
+      SDL_RenderDrawLine(renderer, btn_rect.x + i, btn_rect.y + i,
+                         btn_rect.x + btn_rect.w - 1 - i, btn_rect.y + i);
+      SDL_RenderDrawLine(renderer, btn_rect.x + i, btn_rect.y + i,
+                         btn_rect.x + i, btn_rect.y + btn_rect.h - 1 - i);
+      SDL_SetRenderDrawColor(renderer, 0x40, 0x40, 0x40, 255);
+      SDL_RenderDrawLine(
+          renderer, btn_rect.x + i, btn_rect.y + btn_rect.h - 1 - i,
+          btn_rect.x + btn_rect.w - 1 - i, btn_rect.y + btn_rect.h - 1 - i);
+      SDL_RenderDrawLine(renderer, btn_rect.x + btn_rect.w - 1 - i,
+                         btn_rect.y + i, btn_rect.x + btn_rect.w - 1 - i,
+                         btn_rect.y + btn_rect.h - 1 - i);
+    }
   }
 
-  // Draw pixel art folder icon
-  const char *icon_pixels[16] = {
+  int scale = 2;
+
+  auto draw_icon = [&](const char *icon[16], int offset_x, int offset_y) {
+    for (int y = 0; y < 16; ++y) {
+      for (int x = 0; x < 16; ++x) {
+        char c = icon[y][x];
+        if (c == ' ')
+          continue;
+        if (c == '.')
+          SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
+        else if (c == 'D')
+          SDL_SetRenderDrawColor(renderer, 220, 160, 40, 255);
+        else if (c == 'W')
+          SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255);
+        else if (c == 'Y')
+          SDL_SetRenderDrawColor(renderer, 255, 210, 80, 255);
+        else if (c == 'B')
+          SDL_SetRenderDrawColor(renderer, 100, 150, 255, 255);
+        else if (c == 'G')
+          SDL_SetRenderDrawColor(renderer, 80, 200, 80, 255);
+        else if (c == 'S')
+          SDL_SetRenderDrawColor(renderer, 255, 80, 80, 255);
+
+        SDL_Rect p = {offset_x + x * scale, offset_y + y * scale, scale, scale};
+        SDL_RenderFillRect(renderer, &p);
+      }
+    }
+  };
+
+  const char *load_img_pixels[16] = {
       "                ", "  .....         ", " .DDDDD.        ",
-      " .D...........  ", " .D.WWWWWWWW.D. ", " .D.WWWWWWWW.D. ",
-      " .D.WWWWWWWW.D. ", " .............. ", " .YYYYYYYYYYYY. ",
+      " .D............ ", " .D.BBBGSSBB.D. ", " .D.BBGGGSBB.D. ",
+      " .D.BGGGGGBB.D. ", " .............. ", " .YYYYYYYYYYYY. ",
       " .YYYYYYYYYYYY. ", " .YYYYYYYYYYYY. ", " .YYYYYYYYYYYY. ",
       " .YYYYYYYYYYYY. ", " .YYYYYYYYYYYY. ", " .YYYYYYYYYYYY. ",
       " .............  ",
   };
+  draw_icon(load_img_pixels, bx[0] + (btn_w - 16 * scale) / 2,
+            UI_OFFSET + (50 - 16 * scale) / 2);
 
-  int scale = 2;
-  int offset_x = btn_rect.x + (btn_rect.w - 16 * scale) / 2;
-  int offset_y = btn_rect.y + (btn_rect.h - 16 * scale) / 2;
+  const char *save_pixels[16] = {
+      "                ", "  .....         ", " .DDDDD.        ",
+      " .D...........  ", " .D.WWWWWWWW.D. ", " .D.WWWWWWWW.D. ",
+      " .D.WWWBBWWW.D. ", " .....BBBB..... ", " .YYYBBBBBBYYY. ",
+      " .YYYYYBBYYYYY. ", " .YYYYYBBYYYYY. ", " .YYYYYBBYYYYY. ",
+      " .YYYYYBBYYYYY. ", " .YYYYYYYYYYYY. ", " .YYYYYYYYYYYY. ",
+      " .............  ",
+  };
+  draw_icon(save_pixels, bx[1] + (btn_w - 16 * scale) / 2,
+            UI_OFFSET + (50 - 16 * scale) / 2);
 
-  for (int y = 0; y < 16; ++y) {
-    for (int x = 0; x < 16; ++x) {
-      char c = icon_pixels[y][x];
-      if (c == ' ')
-        continue;
-
-      if (c == '.')
-        SDL_SetRenderDrawColor(renderer, 40, 40, 40, 255);
-      else if (c == 'D')
-        SDL_SetRenderDrawColor(renderer, 220, 160, 40, 255); // Dark yellow
-      else if (c == 'W')
-        SDL_SetRenderDrawColor(renderer, 240, 240, 240, 255); // White paper
-      else if (c == 'Y')
-        SDL_SetRenderDrawColor(renderer, 255, 210, 80, 255); // Light yellow
-
-      SDL_Rect p = {offset_x + x * scale, offset_y + y * scale, scale, scale};
-      SDL_RenderFillRect(renderer, &p);
-    }
-  }
+  const char *load_game_pixels[16] = {
+      "                ", "  .....         ", " .DDDDD.        ",
+      " .D...........  ", " .D.WWWWWWWW.D. ", " .D.WWWWWWWW.D. ",
+      " .D.WWWBBWWW.D. ", " ......BB...... ", " .YYYYYBBYYYYY. ",
+      " .YYYYYBBYYYYY. ", " .YYYBBBBBBYYY. ", " .YYYYBBBBYYYY. ",
+      " .YYYYYBBYYYYY. ", " .YYYYYYYYYYYY. ", " .YYYYYYYYYYYY. ",
+      " .............  ",
+  };
+  draw_icon(load_game_pixels, bx[2] + (btn_w - 16 * scale) / 2,
+            UI_OFFSET + (50 - 16 * scale) / 2);
 }
 
 void Game::render_inventory() {
@@ -979,29 +1287,30 @@ void Game::render_playground() {
   SDL_RenderSetScale(renderer, camera_zoom, camera_zoom);
 
   if (state == GameState::CLEARED) {
-      int root = uf.find(0);
-      const auto &p = pieces[root];
+    int root = uf.find(0);
+    const auto &p = pieces[root];
 
-      SDL_FRect dst = {(float)p.offset_x + camera_x / camera_zoom,
-                       (float)p.offset_y + camera_y / camera_zoom,
-                       (float)segmentation.get_width(), (float)segmentation.get_height()};
-                       
-      if (original_texture) {
-          SDL_RenderCopyF(renderer, original_texture, NULL, &dst);
-      }
-      if (retro_texture) {
-          SDL_RenderCopyF(renderer, retro_texture, NULL, &dst);
-      }
-      
-      // Render particles
-      for (const auto& part : particles) {
-          Uint8 alpha = part.a * part.life / part.max_life;
-          SDL_SetRenderDrawColor(renderer, part.r, part.g, part.b, alpha);
-          SDL_FRect pdst = {(float)p.offset_x + part.x + camera_x / camera_zoom,
-                            (float)p.offset_y + part.y + camera_y / camera_zoom,
-                            part.size, part.size};
-          SDL_RenderFillRectF(renderer, &pdst);
-      }
+    SDL_FRect dst = {(float)p.offset_x + camera_x / camera_zoom,
+                     (float)p.offset_y + camera_y / camera_zoom,
+                     (float)segmentation.get_width(),
+                     (float)segmentation.get_height()};
+
+    if (original_texture) {
+      SDL_RenderCopyF(renderer, original_texture, NULL, &dst);
+    }
+    if (retro_texture) {
+      SDL_RenderCopyF(renderer, retro_texture, NULL, &dst);
+    }
+
+    // Render particles
+    for (const auto &part : particles) {
+      Uint8 alpha = part.a * part.life / part.max_life;
+      SDL_SetRenderDrawColor(renderer, part.r, part.g, part.b, alpha);
+      SDL_FRect pdst = {(float)p.offset_x + part.x + camera_x / camera_zoom,
+                        (float)p.offset_y + part.y + camera_y / camera_zoom,
+                        part.size, part.size};
+      SDL_RenderFillRectF(renderer, &pdst);
+    }
   } else {
     // Draw pieces on board
     for (int i = 0; i < pieces.size(); ++i) {
@@ -1013,9 +1322,10 @@ void Game::render_playground() {
           const auto &pt = piece_textures[i];
           const auto &p = pieces[i];
 
-          SDL_FRect dst = {(float)pt.min_x + p.offset_x + camera_x / camera_zoom,
-                           (float)pt.min_y + p.offset_y + camera_y / camera_zoom,
-                           (float)pt.w, (float)pt.h};
+          SDL_FRect dst = {
+              (float)pt.min_x + p.offset_x + camera_x / camera_zoom,
+              (float)pt.min_y + p.offset_y + camera_y / camera_zoom,
+              (float)pt.w, (float)pt.h};
           SDL_RenderCopyF(renderer, pt.texture, NULL, &dst);
         }
       }
@@ -1047,27 +1357,29 @@ void Game::render() {
   render_inventory();
 
   if (state == GameState::DIFFICULTY_SELECT) {
-    SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300, 240};
+    SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300,
+                      240};
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
     SDL_RenderFillRect(renderer, &modal);
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-    
+
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
     SDL_RenderDrawRect(renderer, &modal);
-    
-    draw_text("Select Difficulty", modal.x + 10, modal.y + 20, 2, 255, 255, 255);
-    
+
+    draw_text("Select Difficulty", modal.x + 10, modal.y + 20, 2, 255, 255,
+              255);
+
     SDL_Rect btn1 = {modal.x + 50, modal.y + 60, 200, 30};
     SDL_SetRenderDrawColor(renderer, 40, 140, 40, 255);
     SDL_RenderFillRect(renderer, &btn1);
     draw_text("Easy", btn1.x + 75, btn1.y + 8, 2, 255, 255, 255);
-    
+
     SDL_Rect btn2 = {modal.x + 50, modal.y + 100, 200, 30};
     SDL_SetRenderDrawColor(renderer, 180, 140, 40, 255);
     SDL_RenderFillRect(renderer, &btn2);
     draw_text("Normal", btn2.x + 65, btn2.y + 8, 2, 255, 255, 255);
-    
+
     SDL_Rect btn3 = {modal.x + 50, modal.y + 140, 200, 30};
     SDL_SetRenderDrawColor(renderer, 180, 40, 40, 255);
     SDL_RenderFillRect(renderer, &btn3);

@@ -102,6 +102,10 @@ private:
   // Helper functions
   bool is_mouse_over_sidebar(int x);
   void open_file_dialog();
+  void save_game_dialog();
+  void load_game_dialog();
+  bool save_game(const std::string& filepath);
+  bool load_game(const std::string& filepath);
   void render_menu_buttons();
   void render_inventory();
   void render_playground();

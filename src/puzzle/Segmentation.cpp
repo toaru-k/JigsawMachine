@@ -6,7 +6,7 @@
 #define MIN_PIECE_SIZE 200
 #define DATA_MASK 0xf0
 
-bool Segmentation::init(const char *filepath, int max_dimension) {
+bool Segmentation::init(const char *filepath, int max_dimension, bool skip_process) {
   original_data = stbi_load(filepath, &orig_w, &orig_h, &n, 3);
   if (!original_data) {
     std::cerr << "Failed to load image" << std::endl;
@@ -76,7 +76,9 @@ bool Segmentation::init(const char *filepath, int max_dimension) {
   std::cout << "0. Initializing pieces: " << pieces.size() << " pixels"
             << std::endl;
 
-  process();
+  if (!skip_process) {
+    process();
+  }
   return true;
 }
 
