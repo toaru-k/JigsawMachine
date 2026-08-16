@@ -17,7 +17,7 @@ public:
   void move_piece(int idx, int dx, int dy);
 
   // Check if a piece can snap to its neighbors. Returns true if snapped.
-  bool snap_piece(int idx);
+  bool snap_piece(int idx, const std::vector<bool>& in_inventory);
 
   // Returns true if all pieces have been connected into a single group
   bool is_cleared() const;
@@ -27,7 +27,7 @@ private:
   UnionFind& uf;
   int board_w, board_h;
 
-  std::vector<int> near_piece(int idx);
+  std::vector<int> near_piece(int idx, const std::vector<bool>& in_inventory);
 };
 
 #endif // PUZZLE_BOARD_H

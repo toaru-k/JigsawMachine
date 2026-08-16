@@ -21,7 +21,7 @@ void PuzzleBoard::move_piece(int idx, int dx, int dy) {
   pieces[root].offset_y += dy;
 }
 
-std::vector<int> PuzzleBoard::near_piece(int idx) {
+std::vector<int> PuzzleBoard::near_piece(int idx, const std::vector<bool>& in_inventory) {
   int root = uf.find(idx);
   Piece &p = pieces[root];
   
@@ -29,6 +29,7 @@ std::vector<int> PuzzleBoard::near_piece(int idx) {
   for (int nid : p.neighbors_id) {
     int nroot = uf.find(nid);
     if (nroot == root) continue;
+    if (in_inventory[nroot]) continue;
     
     Piece &np = pieces[nroot];
     long long dx = p.offset_x - np.offset_x;
@@ -43,9 +44,9 @@ std::vector<int> PuzzleBoard::near_piece(int idx) {
   return nids;
 }
 
-bool PuzzleBoard::snap_piece(int idx) {
+bool PuzzleBoard::snap_piece(int idx, const std::vector<bool>& in_inventory) {
   int root = uf.find(idx);
-  std::vector<int> nearby = near_piece(root);
+  std::vector<int> nearby = near_piece(root, in_inventory);
   
   bool snapped = false;
   for (int nid : nearby) {

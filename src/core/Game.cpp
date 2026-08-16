@@ -793,7 +793,7 @@ void Game::handle_events() {
               in_inventory[selected_piece_id] = true;
               selected_piece_id = -1;
             } else {
-              if (board->snap_piece(selected_piece_id)) {
+              if (board->snap_piece(selected_piece_id, in_inventory)) {
                 clean_textures();
                 int new_root = segmentation.get_uf().find(selected_piece_id);
                 generate_texture(new_root);
