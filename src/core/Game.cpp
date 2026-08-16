@@ -460,6 +460,12 @@ bool Game::save_game(const std::string &filepath) {
     }
   }
 
+  int num_inv = inventory_pieces.size();
+  std::fwrite(&num_inv, sizeof(int), 1, f);
+  for (int id : inventory_pieces) {
+    std::fwrite(&id, sizeof(int), 1, f);
+  }
+
   std::fclose(f);
   return true;
 }
@@ -550,6 +556,17 @@ bool Game::load_game(const std::string &filepath) {
       inventory_pieces.push_back(id);
     }
     generate_texture(id);
+  }
+
+  int num_inv;
+  if (std::fread(&num_inv, sizeof(int), 1, f) == 1) {
+    inventory_pieces.clear();
+    for (int i = 0; i < num_inv; ++i) {
+      int id;
+      if (std::fread(&id, sizeof(int), 1, f) == 1) {
+        inventory_pieces.push_back(id);
+      }
+    }
   }
 
   board = std::make_unique<PuzzleBoard>(
