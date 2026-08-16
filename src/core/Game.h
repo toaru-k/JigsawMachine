@@ -37,7 +37,7 @@ public:
   void clean();
 
   void load_image(const std::string &filepath);
-  void start_puzzle(int max_dimension);
+  void start_puzzle(int max_dimension, bool randomize = false);
 
 private:
   void handle_events();

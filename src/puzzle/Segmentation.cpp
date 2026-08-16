@@ -5,7 +5,8 @@
 #define MIN_PIECE_SIZE 200
 #define DATA_MASK 0xf0
 
-bool Segmentation::init(const char *filepath, int max_dimension, bool skip_process) {
+bool Segmentation::init(const char *filepath, int max_dimension,
+                        bool skip_process) {
   original_data = stbi_load(filepath, &orig_w, &orig_h, &n, 3);
   if (!original_data) {
 
@@ -43,7 +44,6 @@ bool Segmentation::init(const char *filepath, int max_dimension, bool skip_proce
     memcpy(data, original_data, w * h * 3);
   }
 
-
   uf.init(w * h);
   pieces.resize(w * h);
 
@@ -69,7 +69,6 @@ bool Segmentation::init(const char *filepath, int max_dimension, bool skip_proce
         pieces[idx].neighbors_id.push_back(idx + w);
     }
   }
-
 
   if (!skip_process) {
     process();
@@ -119,8 +118,6 @@ void Segmentation::process() {
   // ルートにデータを集約し、隣接情報を整理する
   post_unite_pieces(pieces, uf);
 
-
-
   /* 面積が最小のピースを探し、そのピースの最も色が近い隣接ピースと結合する */
   std::vector<int> small_piece_idx;
   for (int i = 0; i < pieces.size(); i++) {
@@ -131,7 +128,6 @@ void Segmentation::process() {
 
   bool changed = true;
   while (changed && !small_piece_idx.empty()) {
-
 
     changed = false;
     for (int k = 0; k < small_piece_idx.size();) {
@@ -185,6 +181,4 @@ void Segmentation::process() {
       piece_cout++;
     }
   }
-
-
 }

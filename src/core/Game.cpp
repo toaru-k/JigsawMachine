@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <random>
 #include <vector>
 #include <windows.h>
 
@@ -56,8 +57,6 @@ bool Game::init(const char *title, int width, int height) {
   window_width = width;
   window_height = height;
   is_running = true;
-
-
 
   init_audio();
 
@@ -279,7 +278,7 @@ void Game::load_image(const std::string &filepath) {
   state = GameState::DIFFICULTY_SELECT;
 }
 
-void Game::start_puzzle(int max_dimension) {
+void Game::start_puzzle(int max_dimension, bool randomize) {
   for (auto &pair : piece_textures) {
     if (pair.second.texture)
       SDL_DestroyTexture(pair.second.texture);
@@ -300,7 +299,6 @@ void Game::start_puzzle(int max_dimension) {
   }
   segmentation.cleanup();
 
-
   if (segmentation.init(pending_filepath.c_str(), max_dimension)) {
     board = std::make_unique<PuzzleBoard>(
         segmentation.get_pieces(), segmentation.get_uf(),
@@ -317,6 +315,12 @@ void Game::start_puzzle(int max_dimension) {
         in_inventory[i] = true;
         generate_texture(i);
       }
+    }
+
+    if (randomize) {
+      std::random_device rd;
+      std::mt19937 g(rd());
+      std::shuffle(inventory_pieces.begin(), inventory_pieces.end(), g);
     }
 
     camera_x = 50.0f;
@@ -375,7 +379,6 @@ void Game::save_game_dialog() {
     if (save_game(ofn.lpstrFile)) {
 
     } else {
-
     }
   }
 }
@@ -400,7 +403,6 @@ void Game::load_game_dialog() {
     if (load_game(ofn.lpstrFile)) {
 
     } else {
-
     }
   }
 }
@@ -926,26 +928,30 @@ void Game::handle_events() {
           event.button.button == SDL_BUTTON_LEFT) {
         int x = event.button.x;
         int y = event.button.y;
-        SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300,
-                          240};
+        SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 140, 300,
+                          280};
 
         SDL_Rect btn1 = {modal.x + 50, modal.y + 60, 200, 30};
         SDL_Rect btn2 = {modal.x + 50, modal.y + 100, 200, 30};
         SDL_Rect btn3 = {modal.x + 50, modal.y + 140, 200, 30};
         SDL_Rect btn4 = {modal.x + 50, modal.y + 180, 200, 30};
+        SDL_Rect btn5 = {modal.x + 50, modal.y + 220, 200, 30};
 
         if (x >= btn1.x && x <= btn1.x + btn1.w && y >= btn1.y &&
             y <= btn1.y + btn1.h) {
-          start_puzzle(100); // Easy
+          start_puzzle(100, false); // Easy
         } else if (x >= btn2.x && x <= btn2.x + btn2.w && y >= btn2.y &&
                    y <= btn2.y + btn2.h) {
-          start_puzzle(250); // Normal
+          start_puzzle(250, false); // Normal
         } else if (x >= btn3.x && x <= btn3.x + btn3.w && y >= btn3.y &&
                    y <= btn3.y + btn3.h) {
-          start_puzzle(400); // Hard
+          start_puzzle(250, true); // Hard
         } else if (x >= btn4.x && x <= btn4.x + btn4.w && y >= btn4.y &&
                    y <= btn4.y + btn4.h) {
-          start_puzzle(4000); // Very Hard
+          start_puzzle(400, true); // Very Hard
+        } else if (x >= btn5.x && x <= btn5.x + btn5.w && y >= btn5.y &&
+                   y <= btn5.y + btn5.h) {
+          start_puzzle(4000, true); // Hi-Res
         }
       }
     }
@@ -1357,8 +1363,8 @@ void Game::render() {
   render_inventory();
 
   if (state == GameState::DIFFICULTY_SELECT) {
-    SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 120, 300,
-                      240};
+    SDL_Rect modal = {window_width / 2 - 150, window_height / 2 - 140, 300,
+                      280};
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 200);
     SDL_RenderFillRect(renderer, &modal);
@@ -1389,6 +1395,11 @@ void Game::render() {
     SDL_SetRenderDrawColor(renderer, 100, 0, 0, 255);
     SDL_RenderFillRect(renderer, &btn4);
     draw_text("Very Hard", btn4.x + 45, btn4.y + 8, 2, 255, 255, 255);
+
+    SDL_Rect btn5 = {modal.x + 50, modal.y + 220, 200, 30};
+    SDL_SetRenderDrawColor(renderer, 60, 0, 100, 255);
+    SDL_RenderFillRect(renderer, &btn5);
+    draw_text("Hi-Res", btn5.x + 65, btn5.y + 8, 2, 255, 255, 255);
   }
 
   SDL_RenderPresent(renderer);
