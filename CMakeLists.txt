@@ -38,6 +38,11 @@ set(SOURCES
 # Executable target (コンソールを表示するために WIN32 フラグを削除)
 add_executable(${PROJECT_NAME} ${SOURCES})
 
+# Statically link libgcc, libstdc++, and other standard libraries to avoid missing DLL errors
+if(WIN32 OR MINGW)
+    target_link_options(${PROJECT_NAME} PRIVATE -static -static-libgcc -static-libstdc++)
+endif()
+
 # Link SDL2 statically. MSYS2 provides SDL2::SDL2-static target.
 # If not available, fallback to standard SDL2::SDL2 but it might be dynamic.
 if(TARGET SDL2::SDL2-static)
