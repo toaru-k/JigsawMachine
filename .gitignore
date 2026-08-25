@@ -29,3 +29,6 @@ Thumbs.db
 
 # Any temporary or generated assets
 assets/temp/
+
+# Game Zip File
+JigsawMachine.zip
