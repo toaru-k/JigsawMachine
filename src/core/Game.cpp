@@ -956,16 +956,16 @@ void Game::handle_events() {
 
         if (x >= btn1.x && x <= btn1.x + btn1.w && y >= btn1.y &&
             y <= btn1.y + btn1.h) {
-          start_puzzle(100, false); // Easy
+          start_puzzle(100, false); // Normal
         } else if (x >= btn2.x && x <= btn2.x + btn2.w && y >= btn2.y &&
                    y <= btn2.y + btn2.h) {
-          start_puzzle(250, false); // Normal
+          start_puzzle(250, false); // Hard
         } else if (x >= btn3.x && x <= btn3.x + btn3.w && y >= btn3.y &&
                    y <= btn3.y + btn3.h) {
-          start_puzzle(250, true); // Hard
+          start_puzzle(250, true); // Very Hard
         } else if (x >= btn4.x && x <= btn4.x + btn4.w && y >= btn4.y &&
                    y <= btn4.y + btn4.h) {
-          start_puzzle(400, true); // Very Hard
+          start_puzzle(400, true); // Expert
         } else if (x >= btn5.x && x <= btn5.x + btn5.w && y >= btn5.y &&
                    y <= btn5.y + btn5.h) {
           start_puzzle(4000, true); // Hi-Res
@@ -1396,22 +1396,22 @@ void Game::render() {
     SDL_Rect btn1 = {modal.x + 50, modal.y + 60, 200, 30};
     SDL_SetRenderDrawColor(renderer, 40, 140, 40, 255);
     SDL_RenderFillRect(renderer, &btn1);
-    draw_text("Easy", btn1.x + 75, btn1.y + 8, 2, 255, 255, 255);
+    draw_text("Normal", btn1.x + 65, btn1.y + 8, 2, 255, 255, 255);
 
     SDL_Rect btn2 = {modal.x + 50, modal.y + 100, 200, 30};
     SDL_SetRenderDrawColor(renderer, 180, 140, 40, 255);
     SDL_RenderFillRect(renderer, &btn2);
-    draw_text("Normal", btn2.x + 65, btn2.y + 8, 2, 255, 255, 255);
+    draw_text("Hard", btn2.x + 75, btn2.y + 8, 2, 255, 255, 255);
 
     SDL_Rect btn3 = {modal.x + 50, modal.y + 140, 200, 30};
     SDL_SetRenderDrawColor(renderer, 180, 40, 40, 255);
     SDL_RenderFillRect(renderer, &btn3);
-    draw_text("Hard", btn3.x + 75, btn3.y + 8, 2, 255, 255, 255);
+    draw_text("Very Hard", btn3.x + 45, btn3.y + 8, 2, 255, 255, 255);
 
     SDL_Rect btn4 = {modal.x + 50, modal.y + 180, 200, 30};
     SDL_SetRenderDrawColor(renderer, 100, 0, 0, 255);
     SDL_RenderFillRect(renderer, &btn4);
-    draw_text("Very Hard", btn4.x + 45, btn4.y + 8, 2, 255, 255, 255);
+    draw_text("Expert", btn4.x + 65, btn4.y + 8, 2, 255, 255, 255);
 
     SDL_Rect btn5 = {modal.x + 50, modal.y + 220, 200, 30};
     SDL_SetRenderDrawColor(renderer, 60, 0, 100, 255);
