@@ -24,6 +24,8 @@ The more complex the image, the finer the pieces and the more complex the puzzle
 You can also upload an image by dragging and dropping an image file directly from the File Explorer.
 To get started, try playing with the included `sample1.png` and `sample2.jpg`.
 
+Hint: You can zoom in/out with the mouse wheel, and pan the camera by right-click dragging the background or using the WASD keys.
+
 ### Save / Load
 
 You can save your gameplay progress at any time.
